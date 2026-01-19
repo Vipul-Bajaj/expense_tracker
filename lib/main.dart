@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Added for input formatters
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -75,7 +76,7 @@ class Transaction {
   final String? subCategory;
   final DateTime date;
   final List<TransactionSplit>? splits;
-  final String? note; // Added note field
+  final String? note;
 
   Transaction({
     required this.id,
@@ -672,11 +673,17 @@ class _ReportsTabState extends State<ReportsTab> {
     for (var t in monthlyTransactions) {
       if (t.type == TransactionType.expense) {
         if (t.splits != null && t.splits!.isNotEmpty) {
-          for (var split in t.splits!)
-            breakdown[split.category] =
-                (breakdown[split.category] ?? 0) + split.amount;
+          for (var split in t.splits!) {
+            String key = split.subCategory != null && split.subCategory!.isNotEmpty
+                ? "${split.category} - ${split.subCategory}"
+                : split.category;
+            breakdown[key] = (breakdown[key] ?? 0) + split.amount;
+          }
         } else {
-          breakdown[t.category] = (breakdown[t.category] ?? 0) + t.amount;
+          String key = t.subCategory != null && t.subCategory!.isNotEmpty
+              ? "${t.category} - ${t.subCategory}"
+              : t.category;
+          breakdown[key] = (breakdown[key] ?? 0) + t.amount;
         }
       } else if (t.type == TransactionType.transfer && t.fee > 0) {
         breakdown['Transfer Fees'] = (breakdown['Transfer Fees'] ?? 0) + t.fee;
@@ -804,10 +811,13 @@ class _ReportsTabState extends State<ReportsTab> {
           child: Column(
             children: [
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text(entry.key,
-                    style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600,
-                        color: Colors.blueGrey.shade800)),
+                Expanded(
+                  child: Text(entry.key,
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blueGrey.shade800),
+                      overflow: TextOverflow.ellipsis),
+                ),
                 Text(_formatCurrency(entry.value),
                     style: GoogleFonts.inter(
                         fontWeight: FontWeight.bold,
@@ -859,7 +869,8 @@ class _ReportsTabState extends State<ReportsTab> {
                 const SizedBox(width: 8),
                 Expanded(
                     child: Text(entry.key,
-                        style: GoogleFonts.inter(fontSize: 14))),
+                        style: GoogleFonts.inter(fontSize: 14),
+                        overflow: TextOverflow.ellipsis)),
                 Text(_formatCurrency(entry.value),
                     style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
               ],
@@ -1213,6 +1224,85 @@ class TransactionItem extends StatelessWidget {
     );
   }
 
+  void _showTransactionDetails(BuildContext context) {
+    final formatCurrency =
+    NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Transaction Details",
+            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _detailRow("Type",
+                  transaction.type.name[0].toUpperCase() + transaction.type.name.substring(1)),
+              _detailRow("Date", DateFormat('dd MMM yyyy, hh:mm a').format(transaction.date)),
+              _detailRow("Amount", formatCurrency.format(transaction.amount)),
+              if (transaction.fee > 0)
+                _detailRow("Fee", formatCurrency.format(transaction.fee)),
+              const Divider(),
+              if (transaction.type == TransactionType.expense) ...[
+                if (transaction.splits != null && transaction.splits!.isNotEmpty) ...[
+                  Text("Split Breakdown:", style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  ...transaction.splits!.map((s) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text("${s.category}${s.subCategory != null ? ' - ${s.subCategory}' : ''}",
+                            style: GoogleFonts.inter(fontSize: 13)),
+                        Text(formatCurrency.format(s.amount),
+                            style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  )),
+                ] else ...[
+                  _detailRow("Category", transaction.category),
+                  if (transaction.subCategory != null)
+                    _detailRow("Sub-Category", transaction.subCategory!),
+                ],
+              ],
+              const Divider(),
+              if (transaction.note != null && transaction.note!.isNotEmpty)
+                _detailRow("Note", transaction.note!),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Close")),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(label,
+                style: GoogleFonts.inter(
+                    color: Colors.grey.shade600, fontSize: 13)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w500, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTransfer = transaction.type == TransactionType.transfer;
@@ -1229,98 +1319,101 @@ class TransactionItem extends StatelessWidget {
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0)
         .format(transaction.amount + (isTransfer ? transaction.fee : 0));
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
-      decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(16)),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-                color: color.withOpacity(0.1), shape: BoxShape.circle),
-            child: Icon(icon, color: color, size: 20),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                    isTransfer
-                        ? 'Wallet Transfer'
-                        : (isIncome
-                        ? 'Income'
-                        : (isSplit
-                        ? 'Split Expense'
-                        : transaction.category)),
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                Row(
-                  children: [
-                    Text(DateFormat('dd MMM').format(transaction.date),
-                        style: GoogleFonts.inter(
-                            fontSize: 11, color: Colors.blueGrey.shade400)),
-                    if (transaction.subCategory != null &&
-                        !isTransfer &&
-                        !isSplit &&
-                        !isIncome)
-                      Text(' • ${transaction.subCategory}',
+    return GestureDetector(
+      onTap: () => _showTransactionDetails(context),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+        decoration: BoxDecoration(
+            color: Colors.white, borderRadius: BorderRadius.circular(16)),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                  color: color.withOpacity(0.1), shape: BoxShape.circle),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                      isTransfer
+                          ? 'Wallet Transfer'
+                          : (isIncome
+                          ? 'Income'
+                          : (isSplit
+                          ? 'Split Expense'
+                          : transaction.category)),
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  Row(
+                    children: [
+                      Text(DateFormat('dd MMM').format(transaction.date),
                           style: GoogleFonts.inter(
                               fontSize: 11, color: Colors.blueGrey.shade400)),
-                    if (isSplit)
-                      Text(' • ${transaction.splits!.length} items',
-                          style: GoogleFonts.inter(
-                              fontSize: 11, color: Colors.blueGrey.shade400)),
-                    if (transaction.fee > 0)
-                      Text(' • Fee: ${transaction.fee}',
-                          style: GoogleFonts.inter(
-                              fontSize: 10, color: Colors.red.shade400)),
-                  ],
-                ),
-                if (transaction.note != null && transaction.note!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      transaction.note!,
-                      style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontStyle: FontStyle.italic,
-                          color: Colors.blueGrey.shade400),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                      if (transaction.subCategory != null &&
+                          !isTransfer &&
+                          !isSplit &&
+                          !isIncome)
+                        Text(' • ${transaction.subCategory}',
+                            style: GoogleFonts.inter(
+                                fontSize: 11, color: Colors.blueGrey.shade400)),
+                      if (isSplit)
+                        Text(' • ${transaction.splits!.length} items',
+                            style: GoogleFonts.inter(
+                                fontSize: 11, color: Colors.blueGrey.shade400)),
+                      if (transaction.fee > 0)
+                        Text(' • Fee: ${transaction.fee}',
+                            style: GoogleFonts.inter(
+                                fontSize: 10, color: Colors.red.shade400)),
+                    ],
                   ),
+                  if (transaction.note != null && transaction.note!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        transaction.note!,
+                        style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                            color: Colors.blueGrey.shade400),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Text('${isIncome ? "+" : "-"}$amountText',
+                style:
+                GoogleFonts.inter(fontWeight: FontWeight.bold, color: color)),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+              onSelected: (val) {
+                if (val == 'edit') _showEditSheet(context);
+                if (val == 'delete') _deleteTransaction(context, transaction.id);
+              },
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(children: [
+                      Icon(Icons.edit, size: 18),
+                      SizedBox(width: 8),
+                      Text("Edit")
+                    ])),
+                const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(children: [
+                      Icon(Icons.delete, size: 18, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text("Delete", style: TextStyle(color: Colors.red))
+                    ])),
               ],
             ),
-          ),
-          Text('${isIncome ? "+" : "-"}$amountText',
-              style:
-              GoogleFonts.inter(fontWeight: FontWeight.bold, color: color)),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
-            onSelected: (val) {
-              if (val == 'edit') _showEditSheet(context);
-              if (val == 'delete') _deleteTransaction(context, transaction.id);
-            },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(
-                  value: 'edit',
-                  child: Row(children: [
-                    Icon(Icons.edit, size: 18),
-                    SizedBox(width: 8),
-                    Text("Edit")
-                  ])),
-              const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(children: [
-                    Icon(Icons.delete, size: 18, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text("Delete", style: TextStyle(color: Colors.red))
-                  ])),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1496,6 +1589,7 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
             TextField(
                 controller: _balanceCtrl,
                 keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
                 style: GoogleFonts.inter(
                     fontSize: 24, fontWeight: FontWeight.bold),
                 decoration: const InputDecoration(
@@ -1585,6 +1679,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   bool _isSplitMode = false;
   final List<TransactionSplit> _currentSplits = [];
   final TextEditingController _splitAmountCtrl = TextEditingController();
+  String? _splitErrorText; // Added for inline error
 
   Map<String, List<String>> _expenseCategories = {};
   final List<String> _incomeCategories = [
@@ -1607,6 +1702,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
         MapEntry(k.toString(), (v as List).map((e) => e.toString()).toList()));
     _selectedCategory = _expenseCategories.keys.first;
     _selectedSubCategory = _expenseCategories[_selectedCategory]?.firstOrNull;
+
+    // Listen to changes for validation
+    _splitAmountCtrl.addListener(_validateSplitAmount);
+    _amountCtrl.addListener(_validateSplitAmount); // Re-validate if total changes
 
     if (widget.accounts.isNotEmpty) {
       _selectedSourceId = widget.accounts.first.id;
@@ -1641,13 +1740,57 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     }
   }
 
+  @override
+  void dispose() {
+    _splitAmountCtrl.removeListener(_validateSplitAmount);
+    _amountCtrl.removeListener(_validateSplitAmount);
+    _splitAmountCtrl.dispose();
+    _amountCtrl.dispose();
+    _feeCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  void _validateSplitAmount() {
+    if (!_isSplitMode) return;
+
+    final double totalAmount = double.tryParse(_amountCtrl.text) ?? 0;
+    final double splitAmt = double.tryParse(_splitAmountCtrl.text) ?? 0;
+
+    if (totalAmount <= 0) {
+      // Ideally don't show error here, just wait for total input
+      // But if split has value, maybe hint to enter total
+      if (splitAmt > 0) {
+        setState(() => _splitErrorText = "Enter Total Amount first");
+      } else {
+        setState(() => _splitErrorText = null);
+      }
+      return;
+    }
+
+    final double currentTotalSplits = _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
+    final double remaining = totalAmount - currentTotalSplits;
+
+    // Allow for small floating point differences
+    if (splitAmt > remaining + 0.01) {
+      setState(() {
+        _splitErrorText = "Max allowed: ${remaining.toStringAsFixed(2)}";
+      });
+    } else {
+      if (_splitErrorText != null) {
+        setState(() => _splitErrorText = null);
+      }
+    }
+  }
+
   void _save() {
     final double amount = double.tryParse(_amountCtrl.text) ?? 0;
     final double fee = double.tryParse(_feeCtrl.text) ?? 0;
     if (amount <= 0) return;
 
     if (_selectedType == TransactionType.expense && _isSplitMode) {
-      if (_currentSplits.fold(0.0, (sum, s) => sum + s.amount) != amount) {
+      final splitTotal = _currentSplits.fold(0.0, (sum, s) => sum + s.amount);
+      if ((splitTotal - amount).abs() > 0.01) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Split total must match Amount")));
         return;
@@ -1740,15 +1883,38 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
   void _addSplit() {
     final amt = double.tryParse(_splitAmountCtrl.text) ?? 0;
-    if (amt > 0) {
-      setState(() {
-        _currentSplits.add(TransactionSplit(
-            amount: amt,
-            category: _selectedCategory,
-            subCategory: _selectedSubCategory));
-        _splitAmountCtrl.clear();
-      });
+    final totalAmount = double.tryParse(_amountCtrl.text) ?? 0;
+
+    if (totalAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please enter the total amount first")));
+      return;
     }
+
+    if (amt <= 0) return;
+
+    // Check validation state directly
+    if (_splitErrorText != null) {
+      // Error is already shown inline, but prevent add
+      return;
+    }
+
+    // Double check logic just in case
+    final currentTotal = _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
+    if ((currentTotal + amt) > totalAmount + 0.01) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Split exceeds total! Remaining: ₹${(totalAmount - currentTotal).toStringAsFixed(2)}")));
+      return;
+    }
+
+    setState(() {
+      _currentSplits.add(TransactionSplit(
+          amount: amt,
+          category: _selectedCategory,
+          subCategory: _selectedSubCategory));
+      _splitAmountCtrl.clear();
+      _splitErrorText = null; // Clear error after successful add
+    });
   }
 
   Future<void> _pickDate() async {
@@ -1866,6 +2032,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             TextField(
                 controller: _amountCtrl,
                 keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
                 onChanged: (val) => setState(() {}),
                 style: GoogleFonts.inter(
                     fontSize: 24, fontWeight: FontWeight.bold),
@@ -1914,6 +2081,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
               TextField(
                   controller: _feeCtrl,
                   keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
                   decoration: const InputDecoration(
                       labelText: "FEE",
                       prefixText: '₹ ',
@@ -1984,7 +2152,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                     size: 16, color: Colors.red))
                           ]))),
                       const Divider(),
-                      if (remaining > 0) ...[
+                      if (remaining > 0.01) ...[
                         Row(children: [
                           Expanded(
                               flex: 2,
@@ -2023,8 +2191,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                               child: TextField(
                                   controller: _splitAmountCtrl,
                                   keyboardType: TextInputType.number,
+                                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
                                   decoration: InputDecoration(
-                                      hintText: 'Remaining: $remaining',
+                                      hintText: 'Remaining: ${remaining.toStringAsFixed(2)}',
+                                      errorText: _splitErrorText, // Show inline error
                                       isDense: true))),
                           TextButton(
                               onPressed: _addSplit, child: const Text('Add'))
