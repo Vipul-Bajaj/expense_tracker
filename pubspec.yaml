@@ -1,31 +1,38 @@
 name: expense_tracker
-description: An app to help you in tracking your expenses.
+description: Expense Tracker
 publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.1.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  
-  # Adds currency formatting
-  intl: ^0.18.1
-  # Adds modern font styles
+  cupertino_icons: ^1.0.2
   google_fonts: ^6.1.0
-  # Database for persistence
   hive: ^2.2.3
   hive_flutter: ^1.1.0
-  # For finding where to save the file
+  intl: ^0.18.1
   path_provider: ^2.1.1
-  # For sharing the file (Export)
-  share_plus: ^7.1.0
+  share_plus: ^7.2.1
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.13.1
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon.png"
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: "assets/icon.png"
+    background_color: "#ffffff"
+    theme_color: "#ffffff"
 
 flutter:
   uses-material-design: true
