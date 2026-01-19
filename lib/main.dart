@@ -1118,6 +1118,8 @@ class _CategoriesTabState extends State<CategoriesTab> {
                 borderRadius: BorderRadius.circular(16),
                 side: BorderSide(color: Colors.blueGrey.shade100)),
             child: ExpansionTile(
+              shape: const Border(), // Removes the default top/bottom border when expanded
+              collapsedShape: const Border(), // Removes the default top/bottom border when collapsed
               title: Text(cat,
                   style: GoogleFonts.inter(
                       fontWeight: FontWeight.w600,
