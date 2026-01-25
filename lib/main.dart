@@ -619,7 +619,9 @@ class _ReportsTabState extends State<ReportsTab> {
             : "";
 
         if (t.note != null && t.note!.isNotEmpty) {
-          details = details.isEmpty ? "Note: ${t.note}" : "$details | Note: ${t.note}";
+          details = details.isEmpty
+              ? "Note: ${t.note}"
+              : "$details | Note: ${t.note}";
         }
 
         csv.writeln(
@@ -674,7 +676,8 @@ class _ReportsTabState extends State<ReportsTab> {
       if (t.type == TransactionType.expense) {
         if (t.splits != null && t.splits!.isNotEmpty) {
           for (var split in t.splits!) {
-            String key = split.subCategory != null && split.subCategory!.isNotEmpty
+            String key =
+            split.subCategory != null && split.subCategory!.isNotEmpty
                 ? "${split.category} - ${split.subCategory}"
                 : split.category;
             breakdown[key] = (breakdown[key] ?? 0) + split.amount;
@@ -1227,6 +1230,18 @@ class TransactionItem extends StatelessWidget {
   void _showTransactionDetails(BuildContext context) {
     final formatCurrency =
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+
+    // Get Account Name
+    final accountName = accounts
+        .firstWhere((a) => a.id == transaction.sourceAccountId,
+        orElse: () => Account(
+            id: -1,
+            name: 'Unknown',
+            balance: 0,
+            type: AccountType.cash,
+            createdDate: DateTime.now()))
+        .name;
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1237,26 +1252,34 @@ class TransactionItem extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              _detailRow("Type",
-                  transaction.type.name[0].toUpperCase() + transaction.type.name.substring(1)),
-              _detailRow("Date", DateFormat('dd MMM yyyy, hh:mm a').format(transaction.date)),
+              _detailRow(
+                  "Type",
+                  transaction.type.name[0].toUpperCase() +
+                      transaction.type.name.substring(1)),
+              _detailRow("Date",
+                  DateFormat('dd MMM yyyy, hh:mm a').format(transaction.date)),
+              _detailRow("Account", accountName), // Added Account Name Row
               _detailRow("Amount", formatCurrency.format(transaction.amount)),
               if (transaction.fee > 0)
                 _detailRow("Fee", formatCurrency.format(transaction.fee)),
               const Divider(),
               if (transaction.type == TransactionType.expense) ...[
-                if (transaction.splits != null && transaction.splits!.isNotEmpty) ...[
-                  Text("Split Breakdown:", style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+                if (transaction.splits != null &&
+                    transaction.splits!.isNotEmpty) ...[
+                  Text("Split Breakdown:",
+                      style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   ...transaction.splits!.map((s) => Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text("${s.category}${s.subCategory != null ? ' - ${s.subCategory}' : ''}",
+                        Text(
+                            "${s.category}${s.subCategory != null ? ' - ${s.subCategory}' : ''}",
                             style: GoogleFonts.inter(fontSize: 13)),
                         Text(formatCurrency.format(s.amount),
-                            style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
+                            style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w500)),
                       ],
                     ),
                   )),
@@ -1274,8 +1297,7 @@ class TransactionItem extends StatelessWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text("Close")),
+              onPressed: () => Navigator.pop(ctx), child: const Text("Close")),
         ],
       ),
     );
@@ -1387,13 +1409,14 @@ class TransactionItem extends StatelessWidget {
               ),
             ),
             Text('${isIncome ? "+" : "-"}$amountText',
-                style:
-                GoogleFonts.inter(fontWeight: FontWeight.bold, color: color)),
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.bold, color: color)),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
               onSelected: (val) {
                 if (val == 'edit') _showEditSheet(context);
-                if (val == 'delete') _deleteTransaction(context, transaction.id);
+                if (val == 'delete')
+                  _deleteTransaction(context, transaction.id);
               },
               itemBuilder: (ctx) => [
                 const PopupMenuItem(
@@ -1589,7 +1612,9 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
             TextField(
                 controller: _balanceCtrl,
                 keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                ],
                 style: GoogleFonts.inter(
                     fontSize: 24, fontWeight: FontWeight.bold),
                 decoration: const InputDecoration(
@@ -1698,14 +1723,15 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   void initState() {
     super.initState();
     // Load Categories
-    _expenseCategories = (_box.get('categories') as Map).map((k, v) =>
-        MapEntry(k.toString(), (v as List).map((e) => e.toString()).toList()));
+    _expenseCategories = (_box.get('categories') as Map).map((k, v) => MapEntry(
+        k.toString(), (v as List).map((e) => e.toString()).toList()));
     _selectedCategory = _expenseCategories.keys.first;
     _selectedSubCategory = _expenseCategories[_selectedCategory]?.firstOrNull;
 
     // Listen to changes for validation
     _splitAmountCtrl.addListener(_validateSplitAmount);
-    _amountCtrl.addListener(_validateSplitAmount); // Re-validate if total changes
+    _amountCtrl
+        .addListener(_validateSplitAmount); // Re-validate if total changes
 
     if (widget.accounts.isNotEmpty) {
       _selectedSourceId = widget.accounts.first.id;
@@ -1728,7 +1754,12 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       if (t.splits != null && t.splits!.isNotEmpty) {
         _isSplitMode = true;
         _currentSplits.addAll(t.splits!);
-        _selectedCategory = 'Split';
+        // Ensure a valid category is selected for the dropdown, not 'Split'
+        if (_expenseCategories.isNotEmpty) {
+          _selectedCategory = _expenseCategories.keys.first;
+          _selectedSubCategory =
+              _expenseCategories[_selectedCategory]?.firstOrNull;
+        }
       } else {
         if (_selectedType == TransactionType.expense &&
             !_expenseCategories.containsKey(_selectedCategory)) {
@@ -1768,7 +1799,8 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       return;
     }
 
-    final double currentTotalSplits = _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
+    final double currentTotalSplits =
+    _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     final double remaining = totalAmount - currentTotalSplits;
 
     // Allow for small floating point differences
@@ -1900,10 +1932,12 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     }
 
     // Double check logic just in case
-    final currentTotal = _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
+    final currentTotal =
+    _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     if ((currentTotal + amt) > totalAmount + 0.01) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Split exceeds total! Remaining: ₹${(totalAmount - currentTotal).toStringAsFixed(2)}")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              "Split exceeds total! Remaining: ₹${(totalAmount - currentTotal).toStringAsFixed(2)}")));
       return;
     }
 
@@ -2032,7 +2066,9 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             TextField(
                 controller: _amountCtrl,
                 keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                ],
                 onChanged: (val) => setState(() {}),
                 style: GoogleFonts.inter(
                     fontSize: 24, fontWeight: FontWeight.bold),
@@ -2081,7 +2117,9 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
               TextField(
                   controller: _feeCtrl,
                   keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+                  ],
                   decoration: const InputDecoration(
                       labelText: "FEE",
                       prefixText: '₹ ',
@@ -2146,8 +2184,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 style: GoogleFonts.inter(
                                     fontWeight: FontWeight.bold)),
                             IconButton(
-                                onPressed: () => setState(
-                                        () => _currentSplits.removeAt(entry.key)),
+                                onPressed: () => setState(() {
+                                  _currentSplits.removeAt(entry.key);
+                                  _validateSplitAmount();
+                                }),
                                 icon: const Icon(Icons.close,
                                     size: 16, color: Colors.red))
                           ]))),
@@ -2191,10 +2231,15 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                               child: TextField(
                                   controller: _splitAmountCtrl,
                                   keyboardType: TextInputType.number,
-                                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                        RegExp(r'^\d*\.?\d*'))
+                                  ],
                                   decoration: InputDecoration(
-                                      hintText: 'Remaining: ${remaining.toStringAsFixed(2)}',
-                                      errorText: _splitErrorText, // Show inline error
+                                      hintText:
+                                      'Remaining: ${remaining.toStringAsFixed(2)}',
+                                      errorText:
+                                      _splitErrorText, // Show inline error
                                       isDense: true))),
                           TextButton(
                               onPressed: _addSplit, child: const Text('Add'))
@@ -2358,11 +2403,14 @@ class TransactionAdapter extends TypeAdapter<Transaction> {
     final category = reader.readString();
     final subCategory = reader.readBool() ? reader.readString() : null;
     final date = DateTime.fromMillisecondsSinceEpoch(reader.readInt());
-    final splits = reader.readBool() ? (reader.readList().cast<TransactionSplit>()) : null;
+    // Fixed: Added .toList() to ensure the list is modifiable and not a read-only view
+    final splits = reader.readBool()
+        ? (reader.readList().cast<TransactionSplit>().toList())
+        : null;
 
     String? note;
     if (reader.availableBytes > 0) {
-      if(reader.readBool()) {
+      if (reader.readBool()) {
         note = reader.readString();
       }
     }
