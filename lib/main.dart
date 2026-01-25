@@ -527,7 +527,7 @@ class AccountsTab extends StatelessWidget {
                     NumberFormat.currency(
                         locale: 'en_IN',
                         symbol: '₹',
-                        decimalDigits: 0)
+                        decimalDigits: 2)
                         .format(acc.balance),
                     style: GoogleFonts.inter(
                         fontSize: 18,
