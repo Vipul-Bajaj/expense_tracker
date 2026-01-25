@@ -557,9 +557,12 @@ class ReportsTab extends StatefulWidget {
   State<ReportsTab> createState() => _ReportsTabState();
 }
 
+enum ReportType { category, accountType }
+
 class _ReportsTabState extends State<ReportsTab> {
   DateTime _currentMonth = DateTime.now();
   bool _isPieChart = false; // Toggle state
+  ReportType _reportType = ReportType.category; // Track report mode
 
   String _formatCurrency(double amount) {
     final format =
@@ -673,23 +676,46 @@ class _ReportsTabState extends State<ReportsTab> {
     // Calculate Breakdown
     final Map<String, double> breakdown = {};
     for (var t in monthlyTransactions) {
-      if (t.type == TransactionType.expense) {
-        if (t.splits != null && t.splits!.isNotEmpty) {
-          for (var split in t.splits!) {
-            String key =
-            split.subCategory != null && split.subCategory!.isNotEmpty
-                ? "${split.category} - ${split.subCategory}"
-                : split.category;
-            breakdown[key] = (breakdown[key] ?? 0) + split.amount;
+      if (_reportType == ReportType.category) {
+        // --- CATEGORY BASED BREAKDOWN ---
+        if (t.type == TransactionType.expense) {
+          if (t.splits != null && t.splits!.isNotEmpty) {
+            for (var split in t.splits!) {
+              String key =
+              split.subCategory != null && split.subCategory!.isNotEmpty
+                  ? "${split.category} - ${split.subCategory}"
+                  : split.category;
+              breakdown[key] = (breakdown[key] ?? 0) + split.amount;
+            }
+          } else {
+            String key = t.subCategory != null && t.subCategory!.isNotEmpty
+                ? "${t.category} - ${t.subCategory}"
+                : t.category;
+            breakdown[key] = (breakdown[key] ?? 0) + t.amount;
           }
-        } else {
-          String key = t.subCategory != null && t.subCategory!.isNotEmpty
-              ? "${t.category} - ${t.subCategory}"
-              : t.category;
-          breakdown[key] = (breakdown[key] ?? 0) + t.amount;
+        } else if (t.type == TransactionType.transfer && t.fee > 0) {
+          breakdown['Transfer Fees'] =
+              (breakdown['Transfer Fees'] ?? 0) + t.fee;
         }
-      } else if (t.type == TransactionType.transfer && t.fee > 0) {
-        breakdown['Transfer Fees'] = (breakdown['Transfer Fees'] ?? 0) + t.fee;
+      } else {
+        // --- ACCOUNT TYPE BASED BREAKDOWN ---
+        if (t.type == TransactionType.expense ||
+            (t.type == TransactionType.transfer && t.fee > 0)) {
+          final account = widget.accounts.firstWhere(
+                  (a) => a.id == t.sourceAccountId,
+              orElse: () => Account(
+                  id: -1,
+                  name: 'Unknown',
+                  balance: 0,
+                  type: AccountType.cash,
+                  createdDate: DateTime.now()));
+
+          String key = account.type.name[0].toUpperCase() +
+              account.type.name.substring(1);
+
+          double amountToAdd = t.type == TransactionType.expense ? t.amount : t.fee;
+          breakdown[key] = (breakdown[key] ?? 0) + amountToAdd;
+        }
       }
     }
     final sortedBreakdown = Map.fromEntries(
@@ -747,6 +773,79 @@ class _ReportsTabState extends State<ReportsTab> {
           ),
           const SizedBox(height: 24),
 
+          // Report Type Toggle
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _reportType = ReportType.category),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _reportType == ReportType.category
+                            ? Colors.white
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: _reportType == ReportType.category
+                            ? [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 2)
+                        ]
+                            : [],
+                      ),
+                      alignment: Alignment.center,
+                      child: Text("By Category",
+                          style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: _reportType == ReportType.category
+                                  ? Colors.black
+                                  : Colors.grey.shade600)),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _reportType = ReportType.accountType),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _reportType == ReportType.accountType
+                            ? Colors.white
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: _reportType == ReportType.accountType
+                            ? [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 2)
+                        ]
+                            : [],
+                      ),
+                      alignment: Alignment.center,
+                      child: Text("By Account Type",
+                          style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: _reportType == ReportType.accountType
+                                  ? Colors.black
+                                  : Colors.grey.shade600)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
           // Summary Card
           Container(
             padding: const EdgeInsets.all(20),
@@ -777,7 +876,7 @@ class _ReportsTabState extends State<ReportsTab> {
 
           // Breakdown View
           if (sortedBreakdown.isNotEmpty) ...[
-            Text('CATEGORY BREAKDOWN',
+            Text(_reportType == ReportType.category ? 'CATEGORY BREAKDOWN' : 'ACCOUNT TYPE BREAKDOWN',
                 style: GoogleFonts.inter(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -1474,11 +1573,9 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
   void _save() {
     List<Account> accounts = List<Account>.from(
         _box.get('accounts', defaultValue: [])?.cast<Account>() ?? []);
-    final double balance = (widget.existingAccount != null ||
-        _selectedType == AccountType.wallet ||
-        _selectedType == AccountType.cash)
-        ? (double.tryParse(_balanceCtrl.text) ?? 0)
-        : 0.0;
+
+    // Allow empty balance input (defaults to 0.0)
+    final double balance = double.tryParse(_balanceCtrl.text) ?? 0.0;
 
     if (widget.existingAccount != null) {
       final index =
@@ -1522,9 +1619,6 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bool showBalanceField = widget.existingAccount != null ||
-        _selectedType == AccountType.wallet ||
-        _selectedType == AccountType.cash;
     final bool isEditing = widget.existingAccount != null;
 
     return Container(
@@ -1543,7 +1637,7 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
                   height: 4,
                   decoration: BoxDecoration(
                       color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(2)))),
+                      borderRadius: BorderRadius.circular(24)))),
           const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1608,53 +1702,39 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
                   labelText: "Name",
                   border: UnderlineInputBorder())),
           const SizedBox(height: 16),
-          if (showBalanceField) ...[
-            TextField(
-                controller: _balanceCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
-                ],
-                style: GoogleFonts.inter(
-                    fontSize: 24, fontWeight: FontWeight.bold),
-                decoration: const InputDecoration(
-                    prefixText: '₹ ', border: InputBorder.none, hintText: '0')),
-            GestureDetector(
-              onTap: _pickDate,
-              child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                      border: Border(
-                          bottom: BorderSide(color: Colors.grey.shade300))),
-                  child: Row(children: [
-                    const Icon(Icons.calendar_today,
-                        size: 16, color: Colors.blueGrey),
-                    const SizedBox(width: 8),
-                    Text('Date: ',
-                        style: GoogleFonts.inter(
-                            fontSize: 14, color: Colors.grey.shade600)),
-                    Text(DateFormat('dd MMM yyyy').format(_selectedDate),
-                        style: GoogleFonts.inter(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blueGrey.shade800))
-                  ])),
-            ),
-          ] else ...[
-            Container(
-                padding: const EdgeInsets.all(12),
+          // Always show balance field and date picker
+          TextField(
+              controller: _balanceCtrl,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
+              ],
+              style: GoogleFonts.inter(
+                  fontSize: 24, fontWeight: FontWeight.bold),
+              decoration: const InputDecoration(
+                  prefixText: '₹ ',
+                  border: InputBorder.none,
+                  hintText: '0.00 (Optional)')),
+          GestureDetector(
+            onTap: _pickDate,
+            child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8)),
+                    border: Border(
+                        bottom: BorderSide(color: Colors.grey.shade300))),
                 child: Row(children: [
-                  Icon(Icons.info_outline,
-                      size: 16, color: Colors.blue.shade700),
+                  const Icon(Icons.calendar_today,
+                      size: 16, color: Colors.blueGrey),
                   const SizedBox(width: 8),
-                  Expanded(
-                      child: Text("Opening balance skipped for Banks/Cards.",
-                          style: GoogleFonts.inter(
-                              fontSize: 12, color: Colors.blue.shade800)))
+                  Text('Date: ',
+                      style: GoogleFonts.inter(
+                          fontSize: 14, color: Colors.grey.shade600)),
+                  Text(DateFormat('dd MMM yyyy').format(_selectedDate),
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueGrey.shade800))
                 ])),
-          ],
+          ),
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,
