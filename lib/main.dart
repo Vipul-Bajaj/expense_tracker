@@ -1,10 +1,14 @@
 import 'dart:io';
 import 'dart:math';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Added for input formatters
-import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -93,10 +97,56 @@ class Transaction {
   });
 }
 
+// --- AUTH SERVICE ---
+
+class AuthService {
+  static final FirebaseAuth _auth = FirebaseAuth.instance;
+  static final GoogleSignIn _googleSignIn = GoogleSignIn();
+
+  static User? get currentUser => _auth.currentUser;
+
+  static Future<User?> signInWithGoogle() async {
+    try {
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) return null; // User canceled
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final UserCredential userCredential =
+          await _auth.signInWithCredential(credential);
+      return userCredential.user;
+    } catch (e) {
+      debugPrint("Error signing in with Google: $e");
+      return null;
+    }
+  }
+
+  static Future<void> signOut() async {
+    await _googleSignIn.signOut();
+    await _auth.signOut();
+  }
+}
+
 // --- MAIN ENTRY POINT ---
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase
+  // Note: Ensure you have added google-services.json (Android) and GoogleService-Info.plist (iOS)
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint("Firebase initialization failed: $e");
+    // Continue running app even if Firebase fails (e.g., config missing during dev)
+  }
+
   await Hive.initFlutter();
 
   Hive.registerAdapter(AccountTypeAdapter());
@@ -135,16 +185,49 @@ class ExpenseTrackerApp extends StatelessWidget {
 
 // --- 2. Welcome Screen ---
 
-class WelcomeScreen extends StatelessWidget {
+class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
+
+  @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _WelcomeScreenState extends State<WelcomeScreen> {
+  bool _isLoading = false;
 
   void _getStarted(BuildContext context) {
     Navigator.pushReplacement(
         context, MaterialPageRoute(builder: (_) => const MainAppScaffold()));
   }
 
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _isLoading = true);
+    final user = await AuthService.signInWithGoogle();
+    setState(() => _isLoading = false);
+
+    if (user != null) {
+      if (mounted) {
+        Navigator.pushReplacement(context,
+            MaterialPageRoute(builder: (_) => const MainAppScaffold()));
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sign in failed or cancelled')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Check if user is already signed in
+    if (AuthService.currentUser != null) {
+      // Small delay to ensure build is done before navigating
+      Future.delayed(Duration.zero, () {
+        if (mounted) _getStarted(context);
+      });
+    }
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -178,24 +261,48 @@ class WelcomeScreen extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
               const Spacer(),
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: () => _getStarted(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    elevation: 0,
+              if (_isLoading)
+                const CircularProgressIndicator()
+              else ...[
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: () => _getStarted(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                    child: Text('Get Started as Guest',
+                        style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white)),
                   ),
-                  child: Text('Get Started',
-                      style: GoogleFonts.inter(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
                 ),
-              ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: OutlinedButton.icon(
+                    onPressed: _handleGoogleSignIn,
+                    icon: const Icon(Icons.login),
+                    // Replace with Google Icon if asset available
+                    label: Text('Sign in with Google',
+                        style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueGrey.shade700)),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.blueGrey.shade200),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 40),
             ],
           ),
@@ -337,6 +444,7 @@ class DashboardTab extends StatefulWidget {
 
 class _DashboardTabState extends State<DashboardTab> {
   DateTime _currentMonth = DateTime.now();
+  final User? _user = AuthService.currentUser;
 
   String _formatCurrency(double amount) {
     final format =
@@ -349,6 +457,16 @@ class _DashboardTabState extends State<DashboardTab> {
       _currentMonth =
           DateTime(_currentMonth.year, _currentMonth.month + offset);
     });
+  }
+
+  void _signOut(BuildContext context) async {
+    await AuthService.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+        (route) => false,
+      );
+    }
   }
 
   @override
@@ -373,6 +491,38 @@ class _DashboardTabState extends State<DashboardTab> {
         title: Text('Dashboard',
             style: GoogleFonts.inter(
                 fontWeight: FontWeight.bold, color: Colors.blueGrey.shade800)),
+        actions: [
+          if (_user != null) ...[
+            Center(
+              child: Text(
+                _user!.displayName?.split(' ')[0] ?? 'User',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blueGrey.shade700),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _signOut(context),
+              child: CircleAvatar(
+                radius: 16,
+                backgroundColor: Colors.blue.shade100,
+                backgroundImage: _user!.photoURL != null
+                    ? NetworkImage(_user!.photoURL!)
+                    : null,
+                child: _user!.photoURL == null
+                    ? Icon(Icons.person, size: 20, color: Colors.blue.shade700)
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 16),
+          ] else ...[
+            TextButton(
+              onPressed: () => _signOut(context), // Go back to login
+              child: const Text("Sign In"),
+            )
+          ]
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -447,6 +597,9 @@ class _DashboardTabState extends State<DashboardTab> {
     );
   }
 }
+
+// ... rest of the file (AccountsTab, ReportsTab, CategoriesTab, TransactionItem, AddAccountSheet, AddTransactionSheet, Adapters) remains exactly the same ...
+// I will include the rest of the file content below to ensure the file is complete.
 
 // --- 5. Accounts Tab ---
 
