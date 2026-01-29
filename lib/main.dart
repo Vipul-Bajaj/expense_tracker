@@ -616,16 +616,42 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                 : [];
 
             return StreamBuilder<DocumentSnapshot>(
-              stream: userDocRef.collection('settings').doc('categories').snapshots(),
+              stream: userDocRef
+                  .collection('settings')
+                  .doc('categories')
+                  .snapshots(),
               builder: (context, categoriesSnapshot) {
                 Map<String, List<String>> categories = {
                   'Food': ['Groceries', 'Restaurant', 'Snacks'],
-                  'Bills': ['Rent', 'Electricity', 'Internet', 'Water', 'Phone'],
+                  'Bills': [
+                    'Rent',
+                    'Electricity',
+                    'Internet',
+                    'Water',
+                    'Phone'
+                  ],
                   'Transport': ['Fuel', 'Taxi', 'Public', 'Repair'],
                   'Shopping': ['Clothes', 'Electronics', 'Home', 'Gifts'],
-                  'Personal Care': ['Haircut', 'Beard', 'Salon', 'Spa', 'Cosmetics'],
-                  'Skill Dev': ['Dance Class', 'Violin Class', 'Course', 'Workshop'],
-                  'Investment': ['Mutual Funds', 'Stocks', 'FD', 'Gold', 'SIP'],
+                  'Personal Care': [
+                    'Haircut',
+                    'Beard',
+                    'Salon',
+                    'Spa',
+                    'Cosmetics'
+                  ],
+                  'Skill Dev': [
+                    'Dance Class',
+                    'Violin Class',
+                    'Course',
+                    'Workshop'
+                  ],
+                  'Investment': [
+                    'Mutual Funds',
+                    'Stocks',
+                    'FD',
+                    'Gold',
+                    'SIP'
+                  ],
                   'Health': ['Medicine', 'Doctor', 'Insurance'],
                   'Entmt': ['Movies', 'Games', 'Events', 'Date'],
                 };
@@ -633,7 +659,8 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                 if (categoriesSnapshot.hasData &&
                     categoriesSnapshot.data != null &&
                     categoriesSnapshot.data!.exists) {
-                  final data = categoriesSnapshot.data!.data() as Map<String, dynamic>;
+                  final data =
+                  categoriesSnapshot.data!.data() as Map<String, dynamic>;
                   if (data.containsKey('data')) {
                     categories = (data['data'] as Map).map((k, v) => MapEntry(
                         k.toString(),
@@ -680,10 +707,11 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                       ? FloatingActionButton(
                     onPressed: () {
                       if (accounts.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                            content: Text(
-                                'Please add an account first (Accounts Tab)!'),
-                            backgroundColor: Colors.red));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    'Please add an account first (Accounts Tab)!'),
+                                backgroundColor: Colors.red));
                         return;
                       }
                       showModalBottomSheet(
