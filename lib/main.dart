@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:encrypt/encrypt.dart' as enc;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +13,53 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+
+// --- ENCRYPTION SERVICE ---
+
+class EncryptionService {
+  // FIXED KEY for consistent decryption across devices without complex key exchange.
+  // 32 characters for AES-256.
+  static final _key = enc.Key.fromUtf8('ExpenseTrackerSecureKey2024Ver01');
+  static final _encrypter = enc.Encrypter(enc.AES(_key));
+
+  static String encrypt(String plainText) {
+    if (plainText.isEmpty) return plainText;
+    final iv = enc.IV.fromSecureRandom(16);
+    final encrypted = _encrypter.encrypt(plainText, iv: iv);
+    return "${iv.base64}:${encrypted.base64}";
+  }
+
+  static String decrypt(String encryptedText) {
+    if (encryptedText.isEmpty) return encryptedText;
+    try {
+      final parts = encryptedText.split(':');
+      if (parts.length != 2) return encryptedText; // Assume plain text fallback
+
+      final iv = enc.IV.fromBase64(parts[0]);
+      final encrypted = enc.Encrypted.fromBase64(parts[1]);
+      return _encrypter.decrypt(encrypted, iv: iv);
+    } catch (e) {
+      // If decryption fails, return original text (fallback for plaintext legacy data)
+      return encryptedText;
+    }
+  }
+
+  // Helper to handle double encryption
+  static String encryptDouble(double value) => encrypt(value.toString());
+
+  static double decryptDouble(dynamic value) {
+    if (value is num) return value.toDouble(); // Legacy plain number
+    if (value is String) {
+      try {
+        String decrypted = decrypt(value);
+        return double.tryParse(decrypted) ?? 0.0;
+      } catch (_) {
+        return 0.0;
+      }
+    }
+    return 0.0;
+  }
+}
 
 // --- 1. Data Models & Adapters ---
 
@@ -32,6 +81,26 @@ class Account {
     required this.type,
     required this.createdDate,
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': EncryptionService.encrypt(name),
+      'balance': EncryptionService.encryptDouble(balance),
+      'type': type.index,
+      'createdDate': Timestamp.fromDate(createdDate),
+    };
+  }
+
+  factory Account.fromMap(Map<String, dynamic> map) {
+    return Account(
+      id: map['id'],
+      name: EncryptionService.decrypt(map['name']),
+      balance: EncryptionService.decryptDouble(map['balance']),
+      type: AccountType.values[map['type']],
+      createdDate: (map['createdDate'] as Timestamp).toDate(),
+    );
+  }
 
   IconData get icon {
     switch (type) {
@@ -67,6 +136,25 @@ class TransactionSplit {
 
   TransactionSplit(
       {required this.amount, required this.category, this.subCategory});
+
+  Map<String, dynamic> toMap() {
+    return {
+      'amount': EncryptionService.encryptDouble(amount),
+      'category': EncryptionService.encrypt(category),
+      'subCategory':
+      subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
+    };
+  }
+
+  factory TransactionSplit.fromMap(Map<String, dynamic> map) {
+    return TransactionSplit(
+      amount: EncryptionService.decryptDouble(map['amount']),
+      category: EncryptionService.decrypt(map['category']),
+      subCategory: map['subCategory'] != null
+          ? EncryptionService.decrypt(map['subCategory'])
+          : null,
+    );
+  }
 }
 
 class Transaction {
@@ -95,6 +183,47 @@ class Transaction {
     this.splits,
     this.note,
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'amount': EncryptionService.encryptDouble(amount),
+      'fee': EncryptionService.encryptDouble(fee),
+      'type': type.index,
+      'sourceAccountId': sourceAccountId,
+      'targetAccountId': targetAccountId,
+      'category': EncryptionService.encrypt(category),
+      'subCategory':
+      subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
+      'date': Timestamp.fromDate(date),
+      'splits': splits?.map((s) => s.toMap()).toList(),
+      'note': note != null ? EncryptionService.encrypt(note!) : null,
+    };
+  }
+
+  factory Transaction.fromMap(Map<String, dynamic> map) {
+    return Transaction(
+      id: map['id'],
+      amount: EncryptionService.decryptDouble(map['amount']),
+      fee: EncryptionService.decryptDouble(map['fee']),
+      type: TransactionType.values[map['type']],
+      sourceAccountId: map['sourceAccountId'],
+      targetAccountId: map['targetAccountId'],
+      category: EncryptionService.decrypt(map['category']),
+      subCategory: map['subCategory'] != null
+          ? EncryptionService.decrypt(map['subCategory'])
+          : null,
+      date: (map['date'] as Timestamp).toDate(),
+      splits: map['splits'] != null
+          ? (map['splits'] as List)
+          .map((s) => TransactionSplit.fromMap(s))
+          .toList()
+          : null,
+      note: map['note'] != null
+          ? EncryptionService.decrypt(map['note'])
+          : null,
+    );
+  }
 }
 
 // --- AUTH SERVICE ---
@@ -107,11 +236,13 @@ class AuthService {
 
   static Future<User?> signInWithGoogle() async {
     try {
+      await _googleSignIn.signOut(); // Force account picker
+
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null; // User canceled
+      if (googleUser == null) return null;
 
       final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+      await googleUser.authentication;
 
       final OAuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
@@ -119,7 +250,7 @@ class AuthService {
       );
 
       final UserCredential userCredential =
-          await _auth.signInWithCredential(credential);
+      await _auth.signInWithCredential(credential);
       return userCredential.user;
     } catch (e) {
       debugPrint("Error signing in with Google: $e");
@@ -138,17 +269,15 @@ class AuthService {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase
-  // Note: Ensure you have added google-services.json (Android) and GoogleService-Info.plist (iOS)
   try {
     await Firebase.initializeApp();
   } catch (e) {
     debugPrint("Firebase initialization failed: $e");
-    // Continue running app even if Firebase fails (e.g., config missing during dev)
   }
 
   await Hive.initFlutter();
 
+  // Adapters kept for migration purposes
   Hive.registerAdapter(AccountTypeAdapter());
   Hive.registerAdapter(TransactionTypeAdapter());
   Hive.registerAdapter(TransactionSplitAdapter());
@@ -183,7 +312,7 @@ class ExpenseTrackerApp extends StatelessWidget {
   }
 }
 
-// --- 2. Welcome Screen ---
+// --- 2. Welcome Screen (UPDATED) ---
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -195,22 +324,82 @@ class WelcomeScreen extends StatefulWidget {
 class _WelcomeScreenState extends State<WelcomeScreen> {
   bool _isLoading = false;
 
-  void _getStarted(BuildContext context) {
+  void _navigateToDashboard() {
     Navigator.pushReplacement(
         context, MaterialPageRoute(builder: (_) => const MainAppScaffold()));
+  }
+
+  Future<void> _migrateLocalData(String userId) async {
+    final box = Hive.box('expenses_db');
+    if (box.isEmpty) return;
+
+    // Check if we have anything to migrate
+    final accounts = List<Account>.from(
+        box.get('accounts', defaultValue: [])?.cast<Account>() ?? []);
+    final transactions = List<Transaction>.from(
+        box.get('transactions', defaultValue: [])?.cast<Transaction>() ?? []);
+    final categories = box.get('categories');
+
+    if (accounts.isEmpty && transactions.isEmpty && categories == null) {
+      return;
+    }
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final batch = firestore.batch();
+
+      // Migrate Accounts
+      for (var acc in accounts) {
+        final docRef = firestore
+            .collection('users')
+            .doc(userId)
+            .collection('accounts')
+            .doc(acc.id.toString());
+        batch.set(docRef, acc.toMap());
+      }
+
+      // Migrate Transactions
+      for (var txn in transactions) {
+        final docRef = firestore
+            .collection('users')
+            .doc(userId)
+            .collection('transactions')
+            .doc(txn.id);
+        batch.set(docRef, txn.toMap());
+      }
+
+      // Migrate Categories
+      if (categories != null) {
+        final docRef = firestore
+            .collection('users')
+            .doc(userId)
+            .collection('settings')
+            .doc('categories');
+        batch.set(docRef, {'data': categories}, SetOptions(merge: true));
+      }
+
+      await batch.commit();
+      await box.clear(); // Clear local data after successful migration
+      debugPrint("Migration completed successfully.");
+    } catch (e) {
+      debugPrint("Error migrating data: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Error migrating local data: $e")));
+      }
+    }
   }
 
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isLoading = true);
     final user = await AuthService.signInWithGoogle();
-    setState(() => _isLoading = false);
 
     if (user != null) {
-      if (mounted) {
-        Navigator.pushReplacement(context,
-            MaterialPageRoute(builder: (_) => const MainAppScaffold()));
-      }
+      await _migrateLocalData(user.uid);
+      setState(() => _isLoading = false);
+      if (mounted) _navigateToDashboard();
     } else {
+      setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Sign in failed or cancelled')));
@@ -218,15 +407,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
   }
 
+  Future<void> _handleSignOut() async {
+    await AuthService.signOut();
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Check if user is already signed in
-    if (AuthService.currentUser != null) {
-      // Small delay to ensure build is done before navigating
-      Future.delayed(Duration.zero, () {
-        if (mounted) _getStarted(context);
-      });
-    }
+    final user = AuthService.currentUser;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -237,71 +425,146 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Spacer(),
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                    color: Colors.blue.shade50, shape: BoxShape.circle),
-                child:
-                Icon(Icons.wallet, size: 64, color: Colors.blue.shade600),
-              ),
-              const SizedBox(height: 40),
-              Text(
-                'Control Your Money',
-                style: GoogleFonts.inter(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blueGrey.shade900),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Track expenses, income, manage accounts, and analyze your financial health with detailed reports.',
-                style: GoogleFonts.inter(
-                    fontSize: 16, color: Colors.blueGrey.shade500, height: 1.5),
-                textAlign: TextAlign.center,
-              ),
-              const Spacer(),
-              if (_isLoading)
-                const CircularProgressIndicator()
-              else ...[
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: () => _getStarted(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                      elevation: 0,
-                    ),
-                    child: Text('Get Started as Guest',
-                        style: GoogleFonts.inter(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white)),
+              if (user == null) ...[
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                      color: Colors.blue.shade50, shape: BoxShape.circle),
+                  child:
+                  Icon(Icons.wallet, size: 64, color: Colors.blue.shade600),
+                ),
+                const SizedBox(height: 40),
+              ],
+
+              if (user != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.blue.shade100, width: 2),
                   ),
+                  child: CircleAvatar(
+                    radius: 48,
+                    backgroundImage: user.photoURL != null
+                        ? NetworkImage(user.photoURL!)
+                        : null,
+                    backgroundColor: Colors.blue.shade50,
+                    child: user.photoURL == null
+                        ? Text(user.displayName?[0] ?? 'U',
+                        style: GoogleFonts.inter(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700))
+                        : null,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Welcome back,',
+                  style: GoogleFonts.inter(
+                      fontSize: 18, color: Colors.blueGrey.shade500),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  user.displayName ?? 'User',
+                  style: GoogleFonts.inter(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey.shade900),
+                  textAlign: TextAlign.center,
+                ),
+                if (user.email != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      user.email!,
+                      style: GoogleFonts.inter(
+                          fontSize: 14, color: Colors.blueGrey.shade400),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                const Spacer(),
+                if (_isLoading)
+                  const CircularProgressIndicator()
+                else ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _navigateToDashboard,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        elevation: 0,
+                      ),
+                      child: Text('Continue',
+                          style: GoogleFonts.inter(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: OutlinedButton(
+                      onPressed: _handleSignOut,
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.grey.shade300),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
+                      child: Text("Sign Out / Switch Account",
+                          style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blueGrey.shade700)),
+                    ),
+                  ),
+                ]
+              ] else ...[
+                Text(
+                  'Control Your Money',
+                  style: GoogleFonts.inter(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey.shade900),
+                  textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: OutlinedButton.icon(
-                    onPressed: _handleGoogleSignIn,
-                    icon: const Icon(Icons.login),
-                    // Replace with Google Icon if asset available
-                    label: Text('Sign in with Google',
-                        style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blueGrey.shade700)),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.blueGrey.shade200),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
+                Text(
+                  'Track expenses, income, manage accounts, and analyze your financial health with detailed reports.',
+                  style: GoogleFonts.inter(
+                      fontSize: 16, color: Colors.blueGrey.shade500, height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+                const Spacer(),
+                if (_isLoading)
+                  const CircularProgressIndicator()
+                else ...[
+                  // Guest button removed
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: OutlinedButton.icon(
+                      onPressed: _handleGoogleSignIn,
+                      icon: const Icon(Icons.login),
+                      label: Text('Sign in with Google',
+                          style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blueGrey.shade700)),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.blueGrey.shade200),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
               const SizedBox(height: 40),
             ],
@@ -312,7 +575,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 }
 
-// --- 3. Main App Scaffold (Multi-Screen Handling) ---
+// --- 3. Main App Scaffold ---
 
 class MainAppScaffold extends StatefulWidget {
   const MainAppScaffold({super.key});
@@ -323,113 +586,157 @@ class MainAppScaffold extends StatefulWidget {
 
 class _MainAppScaffoldState extends State<MainAppScaffold> {
   int _currentIndex = 0;
-  final Box _box = Hive.box('expenses_db');
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-        valueListenable: _box.listenable(),
-        builder: (context, Box box, widget) {
-          // Load Data from Hive
-          final List<Account> accounts = List<Account>.from(
-              box.get('accounts', defaultValue: [])?.cast<Account>() ?? []);
-          final List<Transaction> transactions = List<Transaction>.from(
-              box.get('transactions', defaultValue: [])?.cast<Transaction>() ??
-                  []);
+    final user = AuthService.currentUser;
+    if (user == null) return const WelcomeScreen();
 
-          // Initial Category Setup if empty
-          if (!box.containsKey('categories')) {
-            box.put('categories', {
-              'Food': ['Groceries', 'Restaurant', 'Snacks'],
-              'Bills': ['Rent', 'Electricity', 'Internet', 'Water', 'Phone'],
-              'Transport': ['Fuel', 'Taxi', 'Public', 'Repair'],
-              'Shopping': ['Clothes', 'Electronics', 'Home', 'Gifts'],
-              'Personal Care': [
-                'Haircut',
-                'Beard',
-                'Salon',
-                'Spa',
-                'Cosmetics'
-              ],
-              'Skill Dev': [
-                'Dance Class',
-                'Violin Class',
-                'Course',
-                'Workshop'
-              ],
-              'Investment': ['Mutual Funds', 'Stocks', 'FD', 'Gold', 'SIP'],
-              'Health': ['Medicine', 'Doctor', 'Insurance'],
-              'Entmt': ['Movies', 'Games', 'Events', 'Date'],
-            });
-          }
-          final Map<String, List<String>> categories =
-          (box.get('categories') as Map).map((k, v) => MapEntry(
-              k.toString(), (v as List).map((e) => e.toString()).toList()));
+    final userDocRef =
+    FirebaseFirestore.instance.collection('users').doc(user.uid);
 
-          final List<Widget> pages = [
-            DashboardTab(accounts: accounts, transactions: transactions),
-            AccountsTab(accounts: accounts),
-            ReportsTab(
-                accounts: accounts,
-                transactions: transactions), // New Reports Tab
-            CategoriesTab(categories: categories),
-          ];
+    return StreamBuilder<QuerySnapshot>(
+      stream: userDocRef.collection('accounts').snapshots(),
+      builder: (context, accountsSnapshot) {
+        final List<Account> accounts = accountsSnapshot.hasData
+            ? accountsSnapshot.data!.docs
+            .map((doc) =>
+            Account.fromMap(doc.data() as Map<String, dynamic>))
+            .toList()
+            : [];
 
-          return Scaffold(
-            body: pages[_currentIndex],
-            bottomNavigationBar: BottomNavigationBar(
-              currentIndex: _currentIndex,
-              onTap: (idx) => setState(() => _currentIndex = idx),
-              selectedItemColor: const Color(0xFF2563EB),
-              unselectedItemColor: Colors.grey,
-              showUnselectedLabels: true,
-              type: BottomNavigationBarType.fixed,
-              items: const [
-                BottomNavigationBarItem(
-                    icon: Icon(Icons.dashboard_outlined),
-                    activeIcon: Icon(Icons.dashboard),
-                    label: 'Dashboard'),
-                BottomNavigationBarItem(
-                    icon: Icon(Icons.account_balance_wallet_outlined),
-                    activeIcon: Icon(Icons.account_balance_wallet),
-                    label: 'Accounts'),
-                BottomNavigationBarItem(
-                    icon: Icon(Icons.bar_chart),
-                    activeIcon: Icon(Icons.bar_chart),
-                    label: 'Reports'),
-                BottomNavigationBarItem(
-                    icon: Icon(Icons.category_outlined),
-                    activeIcon: Icon(Icons.category),
-                    label: 'Categories'),
-              ],
-            ),
-            floatingActionButton: _currentIndex == 0
-                ? FloatingActionButton(
-              onPressed: () {
-                if (accounts.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text(
-                          'Please add an account first (Accounts Tab)!'),
-                      backgroundColor: Colors.red));
-                  return;
+        return StreamBuilder<QuerySnapshot>(
+          stream: userDocRef.collection('transactions').snapshots(),
+          builder: (context, transactionsSnapshot) {
+            final List<Transaction> transactions = transactionsSnapshot.hasData
+                ? transactionsSnapshot.data!.docs
+                .map((doc) =>
+                Transaction.fromMap(doc.data() as Map<String, dynamic>))
+                .toList()
+                : [];
+
+            return StreamBuilder<DocumentSnapshot>(
+              stream: userDocRef
+                  .collection('settings')
+                  .doc('categories')
+                  .snapshots(),
+              builder: (context, categoriesSnapshot) {
+                Map<String, List<String>> categories = {
+                  'Food': ['Groceries', 'Restaurant', 'Snacks'],
+                  'Bills': [
+                    'Rent',
+                    'Electricity',
+                    'Internet',
+                    'Water',
+                    'Phone'
+                  ],
+                  'Transport': ['Fuel', 'Taxi', 'Public', 'Repair'],
+                  'Shopping': ['Clothes', 'Electronics', 'Home', 'Gifts'],
+                  'Personal Care': [
+                    'Haircut',
+                    'Beard',
+                    'Salon',
+                    'Spa',
+                    'Cosmetics'
+                  ],
+                  'Skill Dev': [
+                    'Dance Class',
+                    'Violin Class',
+                    'Course',
+                    'Workshop'
+                  ],
+                  'Investment': [
+                    'Mutual Funds',
+                    'Stocks',
+                    'FD',
+                    'Gold',
+                    'SIP'
+                  ],
+                  'Health': ['Medicine', 'Doctor', 'Insurance'],
+                  'Entmt': ['Movies', 'Games', 'Events', 'Date'],
+                };
+
+                if (categoriesSnapshot.hasData &&
+                    categoriesSnapshot.data != null &&
+                    categoriesSnapshot.data!.exists) {
+                  final data =
+                  categoriesSnapshot.data!.data() as Map<String, dynamic>;
+                  if (data.containsKey('data')) {
+                    categories = (data['data'] as Map).map((k, v) => MapEntry(
+                        k.toString(),
+                        (v as List).map((e) => e.toString()).toList()));
+                  }
                 }
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (_) => AddTransactionSheet(accounts: accounts),
+
+                final List<Widget> pages = [
+                  DashboardTab(accounts: accounts, transactions: transactions),
+                  AccountsTab(accounts: accounts),
+                  ReportsTab(accounts: accounts, transactions: transactions),
+                  CategoriesTab(categories: categories),
+                ];
+
+                return Scaffold(
+                  body: pages[_currentIndex],
+                  bottomNavigationBar: BottomNavigationBar(
+                    currentIndex: _currentIndex,
+                    onTap: (idx) => setState(() => _currentIndex = idx),
+                    selectedItemColor: const Color(0xFF2563EB),
+                    unselectedItemColor: Colors.grey,
+                    showUnselectedLabels: true,
+                    type: BottomNavigationBarType.fixed,
+                    items: const [
+                      BottomNavigationBarItem(
+                          icon: Icon(Icons.dashboard_outlined),
+                          activeIcon: Icon(Icons.dashboard),
+                          label: 'Dashboard'),
+                      BottomNavigationBarItem(
+                          icon: Icon(Icons.account_balance_wallet_outlined),
+                          activeIcon: Icon(Icons.account_balance_wallet),
+                          label: 'Accounts'),
+                      BottomNavigationBarItem(
+                          icon: Icon(Icons.bar_chart),
+                          activeIcon: Icon(Icons.bar_chart),
+                          label: 'Reports'),
+                      BottomNavigationBarItem(
+                          icon: Icon(Icons.category_outlined),
+                          activeIcon: Icon(Icons.category),
+                          label: 'Categories'),
+                    ],
+                  ),
+                  floatingActionButton: _currentIndex == 0
+                      ? FloatingActionButton(
+                    onPressed: () {
+                      if (accounts.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    'Please add an account first (Accounts Tab)!'),
+                                backgroundColor: Colors.red));
+                        return;
+                      }
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) =>
+                            AddTransactionSheet(accounts: accounts),
+                      );
+                    },
+                    backgroundColor: const Color(0xFF2563EB),
+                    child: const Icon(Icons.add, color: Colors.white),
+                  )
+                      : null,
                 );
               },
-              backgroundColor: const Color(0xFF2563EB),
-              child: const Icon(Icons.add, color: Colors.white),
-            )
-                : null,
-          );
-        });
+            );
+          },
+        );
+      },
+    );
   }
 }
 
-// --- 4. Dashboard Tab ---
+// --- 4. Dashboard Tab (UPDATED) ---
 
 class DashboardTab extends StatefulWidget {
   final List<Account> accounts;
@@ -464,21 +771,72 @@ class _DashboardTabState extends State<DashboardTab> {
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-        (route) => false,
+            (route) => false,
       );
     }
   }
 
+  void _showProfileOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_user != null) ...[
+                CircleAvatar(
+                  radius: 32,
+                  backgroundImage: _user!.photoURL != null
+                      ? NetworkImage(_user!.photoURL!)
+                      : null,
+                  child: _user!.photoURL == null
+                      ? Text(_user!.displayName?[0] ?? "U",
+                      style: const TextStyle(fontSize: 24))
+                      : null,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  _user!.displayName ?? 'User',
+                  style: GoogleFonts.inter(
+                      fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  _user!.email ?? '',
+                  style: GoogleFonts.inter(color: Colors.grey),
+                ),
+                const SizedBox(height: 24),
+                const Divider(),
+              ],
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: Text('Sign Out',
+                    style: GoogleFonts.inter(
+                        color: Colors.red, fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _signOut(context);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Filter Transactions
     final monthlyTransactions = widget.transactions.where((t) {
       return t.date.year == _currentMonth.year &&
           t.date.month == _currentMonth.month;
     }).toList();
     monthlyTransactions.sort((a, b) => b.date.compareTo(a.date));
 
-    // Calculate Total Expense
     final double monthlyExpense = monthlyTransactions.fold(0.0, (sum, t) {
       if (t.type == TransactionType.expense) return sum + t.amount;
       if (t.type == TransactionType.transfer) return sum + t.fee;
@@ -493,17 +851,8 @@ class _DashboardTabState extends State<DashboardTab> {
                 fontWeight: FontWeight.bold, color: Colors.blueGrey.shade800)),
         actions: [
           if (_user != null) ...[
-            Center(
-              child: Text(
-                _user!.displayName?.split(' ')[0] ?? 'User',
-                style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w600,
-                    color: Colors.blueGrey.shade700),
-              ),
-            ),
-            const SizedBox(width: 8),
             GestureDetector(
-              onTap: () => _signOut(context),
+              onTap: () => _showProfileOptions(context),
               child: CircleAvatar(
                 radius: 16,
                 backgroundColor: Colors.blue.shade100,
@@ -518,7 +867,7 @@ class _DashboardTabState extends State<DashboardTab> {
             const SizedBox(width: 16),
           ] else ...[
             TextButton(
-              onPressed: () => _signOut(context), // Go back to login
+              onPressed: () => _signOut(context),
               child: const Text("Sign In"),
             )
           ]
@@ -527,7 +876,6 @@ class _DashboardTabState extends State<DashboardTab> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // Month & Total
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
@@ -571,8 +919,6 @@ class _DashboardTabState extends State<DashboardTab> {
             ),
           ),
           const SizedBox(height: 24),
-
-          // Transactions
           Text('RECENT TRANSACTIONS',
               style: GoogleFonts.inter(
                   fontSize: 12,
@@ -590,16 +936,12 @@ class _DashboardTabState extends State<DashboardTab> {
           else
             ...monthlyTransactions.take(10).map((txn) =>
                 TransactionItem(transaction: txn, accounts: widget.accounts)),
-
           const SizedBox(height: 80),
         ],
       ),
     );
   }
 }
-
-// ... rest of the file (AccountsTab, ReportsTab, CategoriesTab, TransactionItem, AddAccountSheet, AddTransactionSheet, Adapters) remains exactly the same ...
-// I will include the rest of the file content below to ensure the file is complete.
 
 // --- 5. Accounts Tab ---
 
@@ -697,7 +1039,7 @@ class AccountsTab extends StatelessWidget {
   }
 }
 
-// --- 6. Reports Tab (UPDATED) ---
+// --- 6. Reports Tab ---
 
 class ReportsTab extends StatefulWidget {
   final List<Account> accounts;
@@ -714,8 +1056,8 @@ enum ReportType { category, accountType }
 
 class _ReportsTabState extends State<ReportsTab> {
   DateTime _currentMonth = DateTime.now();
-  bool _isPieChart = false; // Toggle state
-  ReportType _reportType = ReportType.category; // Track report mode
+  bool _isPieChart = false;
+  ReportType _reportType = ReportType.category;
 
   String _formatCurrency(double amount) {
     final format =
@@ -794,7 +1136,6 @@ class _ReportsTabState extends State<ReportsTab> {
     }
   }
 
-  // Generate colors for pie chart
   Color _getColor(int index) {
     const colors = [
       Color(0xFF3B82F6), // Blue
@@ -813,24 +1154,20 @@ class _ReportsTabState extends State<ReportsTab> {
 
   @override
   Widget build(BuildContext context) {
-    // Filter Transactions
     final monthlyTransactions = widget.transactions.where((t) {
       return t.date.year == _currentMonth.year &&
           t.date.month == _currentMonth.month;
     }).toList();
 
-    // Calculate Total Expense
     final double monthlyExpense = monthlyTransactions.fold(0.0, (sum, t) {
       if (t.type == TransactionType.expense) return sum + t.amount;
       if (t.type == TransactionType.transfer) return sum + t.fee;
       return sum;
     });
 
-    // Calculate Breakdown
     final Map<String, double> breakdown = {};
     for (var t in monthlyTransactions) {
       if (_reportType == ReportType.category) {
-        // --- CATEGORY BASED BREAKDOWN ---
         if (t.type == TransactionType.expense) {
           if (t.splits != null && t.splits!.isNotEmpty) {
             for (var split in t.splits!) {
@@ -851,7 +1188,6 @@ class _ReportsTabState extends State<ReportsTab> {
               (breakdown['Transfer Fees'] ?? 0) + t.fee;
         }
       } else {
-        // --- ACCOUNT TYPE BASED BREAKDOWN ---
         if (t.type == TransactionType.expense ||
             (t.type == TransactionType.transfer && t.fee > 0)) {
           final account = widget.accounts.firstWhere(
@@ -866,7 +1202,8 @@ class _ReportsTabState extends State<ReportsTab> {
           String key = account.type.name[0].toUpperCase() +
               account.type.name.substring(1);
 
-          double amountToAdd = t.type == TransactionType.expense ? t.amount : t.fee;
+          double amountToAdd =
+          t.type == TransactionType.expense ? t.amount : t.fee;
           breakdown[key] = (breakdown[key] ?? 0) + amountToAdd;
         }
       }
@@ -881,14 +1218,12 @@ class _ReportsTabState extends State<ReportsTab> {
             style: GoogleFonts.inter(
                 fontWeight: FontWeight.bold, color: Colors.blueGrey.shade800)),
         actions: [
-          // View Toggle
           IconButton(
             onPressed: () => setState(() => _isPieChart = !_isPieChart),
             icon: Icon(_isPieChart ? Icons.list : Icons.pie_chart,
                 color: Colors.blueGrey.shade700),
             tooltip: _isPieChart ? 'Switch to List' : 'Switch to Pie Chart',
           ),
-          // Export Button
           TextButton.icon(
             onPressed: _exportData,
             icon: const Icon(Icons.download, size: 18),
@@ -902,7 +1237,6 @@ class _ReportsTabState extends State<ReportsTab> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // Month Selector
           Container(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
             decoration: BoxDecoration(
@@ -925,8 +1259,6 @@ class _ReportsTabState extends State<ReportsTab> {
             ),
           ),
           const SizedBox(height: 24),
-
-          // Report Type Toggle
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(4),
@@ -938,7 +1270,8 @@ class _ReportsTabState extends State<ReportsTab> {
               children: [
                 Expanded(
                   child: GestureDetector(
-                    onTap: () => setState(() => _reportType = ReportType.category),
+                    onTap: () =>
+                        setState(() => _reportType = ReportType.category),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       decoration: BoxDecoration(
@@ -967,7 +1300,8 @@ class _ReportsTabState extends State<ReportsTab> {
                 ),
                 Expanded(
                   child: GestureDetector(
-                    onTap: () => setState(() => _reportType = ReportType.accountType),
+                    onTap: () =>
+                        setState(() => _reportType = ReportType.accountType),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       decoration: BoxDecoration(
@@ -998,8 +1332,6 @@ class _ReportsTabState extends State<ReportsTab> {
             ),
           ),
           const SizedBox(height: 24),
-
-          // Summary Card
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -1026,10 +1358,11 @@ class _ReportsTabState extends State<ReportsTab> {
             ),
           ),
           const SizedBox(height: 24),
-
-          // Breakdown View
           if (sortedBreakdown.isNotEmpty) ...[
-            Text(_reportType == ReportType.category ? 'CATEGORY BREAKDOWN' : 'ACCOUNT TYPE BREAKDOWN',
+            Text(
+                _reportType == ReportType.category
+                    ? 'CATEGORY BREAKDOWN'
+                    : 'ACCOUNT TYPE BREAKDOWN',
                 style: GoogleFonts.inter(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -1054,8 +1387,6 @@ class _ReportsTabState extends State<ReportsTab> {
       ),
     );
   }
-
-  // --- Helper Widgets ---
 
   Widget _buildBarList(Map<String, double> data, double total) {
     return Column(
@@ -1108,7 +1439,6 @@ class _ReportsTabState extends State<ReportsTab> {
           ),
         ),
         const SizedBox(height: 24),
-        // Legend
         ...data.entries.toList().asMap().entries.map((e) {
           final idx = e.key;
           final entry = e.value;
@@ -1137,7 +1467,6 @@ class _ReportsTabState extends State<ReportsTab> {
   }
 }
 
-// --- Custom Pie Chart Painter ---
 class PieChartPainter extends CustomPainter {
   final Map<String, double> data;
   final double total;
@@ -1148,7 +1477,7 @@ class PieChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    double startAngle = -pi / 2; // Start from top
+    double startAngle = -pi / 2;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = min(size.width / 2, size.height / 2);
     final rect = Rect.fromCircle(center: center, radius: radius);
@@ -1162,7 +1491,6 @@ class PieChartPainter extends CustomPainter {
 
       canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
 
-      // Separator line
       final borderPaint = Paint()
         ..color = Colors.white
         ..style = PaintingStyle.stroke
@@ -1173,7 +1501,6 @@ class PieChartPainter extends CustomPainter {
       i++;
     });
 
-    // Donut hole (Optional style)
     final holePaint = Paint()..color = Colors.white;
     canvas.drawCircle(center, radius * 0.5, holePaint);
   }
@@ -1194,10 +1521,16 @@ class CategoriesTab extends StatefulWidget {
 }
 
 class _CategoriesTabState extends State<CategoriesTab> {
-  final Box _box = Hive.box('expenses_db');
-
   void _updateCategories(Map<String, List<String>> newCats) {
-    _box.put('categories', newCats);
+    final user = AuthService.currentUser;
+    if (user != null) {
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('settings')
+          .doc('categories')
+          .set({'data': newCats});
+    }
   }
 
   void _addCategory() {
@@ -1272,7 +1605,6 @@ class _CategoriesTabState extends State<CategoriesTab> {
         actions: [
           TextButton(
               onPressed: () {
-                // Delete logic
                 showDialog(
                     context: context,
                     builder: (c) => AlertDialog(
@@ -1290,8 +1622,8 @@ class _CategoriesTabState extends State<CategoriesTab> {
                                   widget.categories);
                               newCats.remove(oldName);
                               _updateCategories(newCats);
-                              Navigator.pop(c); // close confirm
-                              Navigator.pop(ctx); // close edit
+                              Navigator.pop(c);
+                              Navigator.pop(ctx);
                             },
                             style: TextButton.styleFrom(
                                 foregroundColor: Colors.red),
@@ -1384,8 +1716,8 @@ class _CategoriesTabState extends State<CategoriesTab> {
                 borderRadius: BorderRadius.circular(16),
                 side: BorderSide(color: Colors.blueGrey.shade100)),
             child: ExpansionTile(
-              shape: const Border(), // Removes the default top/bottom border when expanded
-              collapsedShape: const Border(), // Removes the default top/bottom border when collapsed
+              shape: const Border(),
+              collapsedShape: const Border(),
               title: Text(cat,
                   style: GoogleFonts.inter(
                       fontWeight: FontWeight.w600,
@@ -1428,7 +1760,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
   }
 }
 
-// --- 8. Transaction Item Widget (Reusable) ---
+// --- 8. Transaction Item Widget ---
 
 class TransactionItem extends StatelessWidget {
   final Transaction transaction;
@@ -1438,35 +1770,65 @@ class TransactionItem extends StatelessWidget {
       {super.key, required this.transaction, required this.accounts});
 
   void _deleteTransaction(BuildContext context, String id) {
-    // Logic to delete transaction and revert balance
-    final box = Hive.box('expenses_db');
-    List<Transaction> transactions = List<Transaction>.from(
-        box.get('transactions', defaultValue: [])?.cast<Transaction>() ?? []);
-    List<Account> accts = List<Account>.from(
-        box.get('accounts', defaultValue: [])?.cast<Account>() ?? []);
+    final user = AuthService.currentUser;
+    if (user == null) return;
 
-    final index = transactions.indexWhere((t) => t.id == id);
-    if (index == -1) return;
-    final txn = transactions[index];
+    final firestore = FirebaseFirestore.instance;
+    final userDoc = firestore.collection('users').doc(user.uid);
 
-    // Revert logic
-    final sourceIndex = accts.indexWhere((a) => a.id == txn.sourceAccountId);
-    if (sourceIndex != -1) {
-      if (txn.type == TransactionType.expense)
-        accts[sourceIndex].balance += txn.amount;
-      else if (txn.type == TransactionType.transfer)
-        accts[sourceIndex].balance += (txn.amount + txn.fee);
-      else if (txn.type == TransactionType.income)
-        accts[sourceIndex].balance -= txn.amount;
+    final txn = transaction;
+
+    final sourceAccount = accounts.firstWhere((a) => a.id == txn.sourceAccountId,
+        orElse: () => Account(
+            id: -1,
+            name: 'Unknown',
+            balance: 0,
+            type: AccountType.cash,
+            createdDate: DateTime.now()));
+
+    // Revert balances
+    if (sourceAccount.id != -1) {
+      double newBalance = sourceAccount.balance;
+      if (txn.type == TransactionType.expense) {
+        newBalance += txn.amount;
+      } else if (txn.type == TransactionType.transfer) {
+        newBalance += (txn.amount + txn.fee);
+      } else if (txn.type == TransactionType.income) {
+        newBalance -= txn.amount;
+      }
+      // Note: EncryptionService handles double -> encrypted string inside the model's toMap().
+      // However, for updates, we often need to set specific fields.
+      // Since toMap handles encryption, we can create a temporary Account object and use toMap,
+      // or manually encrypt here.
+
+      // Let's create a temp object update logic via `userDoc` which is cleaner.
+      // But `update` requires a Map.
+
+      userDoc
+          .collection('accounts')
+          .doc(sourceAccount.id.toString())
+          .update({'balance': EncryptionService.encryptDouble(newBalance)});
     }
+
     if (txn.type == TransactionType.transfer && txn.targetAccountId != null) {
-      final targetIndex = accts.indexWhere((a) => a.id == txn.targetAccountId);
-      if (targetIndex != -1) accts[targetIndex].balance -= txn.amount;
+      final targetAccount = accounts.firstWhere(
+              (a) => a.id == txn.targetAccountId,
+          orElse: () => Account(
+              id: -1,
+              name: 'Unknown',
+              balance: 0,
+              type: AccountType.cash,
+              createdDate: DateTime.now()));
+      if (targetAccount.id != -1) {
+        double newBal = targetAccount.balance - txn.amount;
+        userDoc
+            .collection('accounts')
+            .doc(targetAccount.id.toString())
+            .update({'balance': EncryptionService.encryptDouble(newBal)});
+      }
     }
 
-    transactions.removeAt(index);
-    box.put('transactions', transactions);
-    box.put('accounts', accts);
+    userDoc.collection('transactions').doc(id).delete();
   }
 
   void _showEditSheet(BuildContext context) {
@@ -1483,7 +1845,6 @@ class TransactionItem extends StatelessWidget {
     final formatCurrency =
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
-    // Get Account Name
     final accountName = accounts
         .firstWhere((a) => a.id == transaction.sourceAccountId,
         orElse: () => Account(
@@ -1510,7 +1871,7 @@ class TransactionItem extends StatelessWidget {
                       transaction.type.name.substring(1)),
               _detailRow("Date",
                   DateFormat('dd MMM yyyy, hh:mm a').format(transaction.date)),
-              _detailRow("Account", accountName), // Added Account Name Row
+              _detailRow("Account", accountName),
               _detailRow("Amount", formatCurrency.format(transaction.amount)),
               if (transaction.fee > 0)
                 _detailRow("Fee", formatCurrency.format(transaction.fee)),
@@ -1710,7 +2071,6 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
   final TextEditingController _balanceCtrl = TextEditingController();
   AccountType _selectedType = AccountType.bank;
   DateTime _selectedDate = DateTime.now();
-  final Box _box = Hive.box('expenses_db');
 
   @override
   void initState() {
@@ -1724,40 +2084,40 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
   }
 
   void _save() {
-    List<Account> accounts = List<Account>.from(
-        _box.get('accounts', defaultValue: [])?.cast<Account>() ?? []);
+    final user = AuthService.currentUser;
+    if (user == null) return;
 
-    // Allow empty balance input (defaults to 0.0)
     final double balance = double.tryParse(_balanceCtrl.text) ?? 0.0;
+    final int id =
+        widget.existingAccount?.id ?? DateTime.now().millisecondsSinceEpoch;
 
-    if (widget.existingAccount != null) {
-      final index =
-      accounts.indexWhere((a) => a.id == widget.existingAccount!.id);
-      if (index != -1) {
-        accounts[index] = Account(
-            id: widget.existingAccount!.id,
-            name: _nameCtrl.text,
-            balance: balance,
-            type: _selectedType,
-            createdDate: _selectedDate);
-      }
-    } else {
-      accounts.add(Account(
-          id: DateTime.now().millisecondsSinceEpoch,
-          name: _nameCtrl.text,
-          balance: balance,
-          type: _selectedType,
-          createdDate: _selectedDate));
-    }
-    _box.put('accounts', accounts);
+    final account = Account(
+        id: id,
+        name: _nameCtrl.text,
+        balance: balance,
+        type: _selectedType,
+        createdDate: _selectedDate);
+
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('accounts')
+        .doc(id.toString())
+        .set(account.toMap());
+
     Navigator.pop(context);
   }
 
   void _delete() {
-    List<Account> accounts = List<Account>.from(
-        _box.get('accounts', defaultValue: [])?.cast<Account>() ?? []);
-    accounts.removeWhere((a) => a.id == widget.existingAccount!.id);
-    _box.put('accounts', accounts);
+    final user = AuthService.currentUser;
+    if (user != null && widget.existingAccount != null) {
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('accounts')
+          .doc(widget.existingAccount!.id.toString())
+          .delete();
+    }
     Navigator.pop(context);
   }
 
@@ -1855,15 +2215,14 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
                   labelText: "Name",
                   border: UnderlineInputBorder())),
           const SizedBox(height: 16),
-          // Always show balance field and date picker
           TextField(
               controller: _balanceCtrl,
               keyboardType: TextInputType.number,
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
               ],
-              style: GoogleFonts.inter(
-                  fontSize: 24, fontWeight: FontWeight.bold),
+              style:
+              GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
               decoration: const InputDecoration(
                   prefixText: '₹ ',
                   border: InputBorder.none,
@@ -1937,7 +2296,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   bool _isSplitMode = false;
   final List<TransactionSplit> _currentSplits = [];
   final TextEditingController _splitAmountCtrl = TextEditingController();
-  String? _splitErrorText; // Added for inline error
+  String? _splitErrorText;
 
   Map<String, List<String>> _expenseCategories = {};
   final List<String> _incomeCategories = [
@@ -1950,21 +2309,14 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   ];
   String _selectedCategory = '';
   String? _selectedSubCategory;
-  final Box _box = Hive.box('expenses_db');
 
   @override
   void initState() {
     super.initState();
-    // Load Categories
-    _expenseCategories = (_box.get('categories') as Map).map((k, v) => MapEntry(
-        k.toString(), (v as List).map((e) => e.toString()).toList()));
-    _selectedCategory = _expenseCategories.keys.first;
-    _selectedSubCategory = _expenseCategories[_selectedCategory]?.firstOrNull;
+    _fetchCategories();
 
-    // Listen to changes for validation
     _splitAmountCtrl.addListener(_validateSplitAmount);
-    _amountCtrl
-        .addListener(_validateSplitAmount); // Re-validate if total changes
+    _amountCtrl.addListener(_validateSplitAmount);
 
     if (widget.accounts.isNotEmpty) {
       _selectedSourceId = widget.accounts.first.id;
@@ -1987,19 +2339,42 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       if (t.splits != null && t.splits!.isNotEmpty) {
         _isSplitMode = true;
         _currentSplits.addAll(t.splits!);
-        // Ensure a valid category is selected for the dropdown, not 'Split'
-        if (_expenseCategories.isNotEmpty) {
-          _selectedCategory = _expenseCategories.keys.first;
-          _selectedSubCategory =
-              _expenseCategories[_selectedCategory]?.firstOrNull;
-        }
+      }
+    }
+  }
+
+  void _fetchCategories() async {
+    final user = AuthService.currentUser;
+    if (user != null) {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('settings')
+          .doc('categories')
+          .get();
+      if (doc.exists && doc.data()!.containsKey('data')) {
+        setState(() {
+          _expenseCategories = (doc.data()!['data'] as Map).map((k, v) =>
+              MapEntry(
+                  k.toString(), (v as List).map((e) => e.toString()).toList()));
+          if (_selectedCategory.isEmpty && _expenseCategories.isNotEmpty) {
+            _selectedCategory = _expenseCategories.keys.first;
+            _selectedSubCategory =
+                _expenseCategories[_selectedCategory]?.firstOrNull;
+          }
+        });
       } else {
-        if (_selectedType == TransactionType.expense &&
-            !_expenseCategories.containsKey(_selectedCategory)) {
+        // Fallback default
+        setState(() {
+          _expenseCategories = {
+            'Food': ['Groceries', 'Restaurant', 'Snacks'],
+            'Bills': ['Rent', 'Electricity', 'Internet', 'Water', 'Phone'],
+            'Transport': ['Fuel', 'Taxi', 'Public', 'Repair'],
+            'Shopping': ['Clothes', 'Electronics', 'Home', 'Gifts'],
+          };
           _selectedCategory = _expenseCategories.keys.first;
-          _selectedSubCategory =
-              _expenseCategories[_selectedCategory]?.firstOrNull;
-        }
+          _selectedSubCategory = _expenseCategories[_selectedCategory]?.firstOrNull;
+        });
       }
     }
   }
@@ -2022,8 +2397,6 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     final double splitAmt = double.tryParse(_splitAmountCtrl.text) ?? 0;
 
     if (totalAmount <= 0) {
-      // Ideally don't show error here, just wait for total input
-      // But if split has value, maybe hint to enter total
       if (splitAmt > 0) {
         setState(() => _splitErrorText = "Enter Total Amount first");
       } else {
@@ -2036,7 +2409,6 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     final double remaining = totalAmount - currentTotalSplits;
 
-    // Allow for small floating point differences
     if (splitAmt > remaining + 0.01) {
       setState(() {
         _splitErrorText = "Max allowed: ${remaining.toStringAsFixed(2)}";
@@ -2049,6 +2421,9 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   }
 
   void _save() {
+    final user = AuthService.currentUser;
+    if (user == null) return;
+
     final double amount = double.tryParse(_amountCtrl.text) ?? 0;
     final double fee = double.tryParse(_feeCtrl.text) ?? 0;
     if (amount <= 0) return;
@@ -2062,34 +2437,36 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       }
     }
 
-    List<Transaction> transactions = List<Transaction>.from(
-        _box.get('transactions', defaultValue: [])?.cast<Transaction>() ?? []);
-    List<Account> accounts = List<Account>.from(
-        _box.get('accounts', defaultValue: [])?.cast<Account>() ?? []);
+    final firestore = FirebaseFirestore.instance;
+    final userDoc = firestore.collection('users').doc(user.uid);
 
-    // 1. If Editing, Revert Old
+    // Revert old balance if editing
     if (widget.existingTransaction != null) {
       final oldTxn = widget.existingTransaction!;
-      final idx = transactions.indexWhere((t) => t.id == oldTxn.id);
-      if (idx != -1) transactions.removeAt(idx);
-
-      final sIdx = accounts.indexWhere((a) => a.id == oldTxn.sourceAccountId);
+      final sIdx = widget.accounts
+          .indexWhere((a) => a.id == oldTxn.sourceAccountId);
       if (sIdx != -1) {
+        double newBal = widget.accounts[sIdx].balance;
         if (oldTxn.type == TransactionType.expense)
-          accounts[sIdx].balance += oldTxn.amount;
+          newBal += oldTxn.amount;
         else if (oldTxn.type == TransactionType.transfer)
-          accounts[sIdx].balance += (oldTxn.amount + oldTxn.fee);
+          newBal += (oldTxn.amount + oldTxn.fee);
         else if (oldTxn.type == TransactionType.income)
-          accounts[sIdx].balance -= oldTxn.amount;
+          newBal -= oldTxn.amount;
+
+        userDoc.collection('accounts').doc(widget.accounts[sIdx].id.toString()).update({'balance': EncryptionService.encryptDouble(newBal)});
       }
       if (oldTxn.type == TransactionType.transfer &&
           oldTxn.targetAccountId != null) {
-        final tIdx = accounts.indexWhere((a) => a.id == oldTxn.targetAccountId);
-        if (tIdx != -1) accounts[tIdx].balance -= oldTxn.amount;
+        final tIdx = widget.accounts
+            .indexWhere((a) => a.id == oldTxn.targetAccountId);
+        if (tIdx != -1) {
+          double newBal = widget.accounts[tIdx].balance - oldTxn.amount;
+          userDoc.collection('accounts').doc(widget.accounts[tIdx].id.toString()).update({'balance': EncryptionService.encryptDouble(newBal)});
+        }
       }
     }
 
-    // 2. Create New
     final newTxn = Transaction(
       id: widget.existingTransaction?.id ?? DateTime.now().toString(),
       amount: amount,
@@ -2111,28 +2488,34 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       note: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
     );
 
-    // 3. Apply New Balance
-    final sIdx = accounts.indexWhere((a) => a.id == newTxn.sourceAccountId);
-    if (sIdx != -1) {
-      if (newTxn.type == TransactionType.expense)
-        accounts[sIdx].balance -= newTxn.amount;
-      else if (newTxn.type == TransactionType.transfer)
-        accounts[sIdx].balance -= (newTxn.amount + newTxn.fee);
-      else if (newTxn.type == TransactionType.income)
-        accounts[sIdx].balance += newTxn.amount;
+    // Update new balance logic.
+    // Fetch current balance from accounts snapshot passed in widget to ensure we encrypt the latest visible value +/- delta.
+
+    // Note: Since we are encrypting, we can't use FieldValue.increment easily (server doesn't know how to decrypt).
+    // We must read-modify-write.
+    // Luckily we have the latest account state from the stream in `widget.accounts`.
+
+    Account sourceAcc = widget.accounts.firstWhere((a) => a.id == newTxn.sourceAccountId);
+    double sourceBal = sourceAcc.balance;
+
+    if (newTxn.type == TransactionType.expense) {
+      sourceBal -= newTxn.amount;
+    } else if (newTxn.type == TransactionType.transfer) {
+      sourceBal -= (newTxn.amount + newTxn.fee);
+    } else if (newTxn.type == TransactionType.income) {
+      sourceBal += newTxn.amount;
     }
-    if (newTxn.type == TransactionType.transfer &&
-        newTxn.targetAccountId != null) {
-      final tIdx = accounts.indexWhere((a) => a.id == newTxn.targetAccountId);
-      if (tIdx != -1) accounts[tIdx].balance += newTxn.amount;
+    userDoc.collection('accounts').doc(sourceAcc.id.toString()).update({'balance': EncryptionService.encryptDouble(sourceBal)});
+
+
+    if (newTxn.type == TransactionType.transfer && newTxn.targetAccountId != null) {
+      Account targetAcc = widget.accounts.firstWhere((a) => a.id == newTxn.targetAccountId);
+      double targetBal = targetAcc.balance + newTxn.amount;
+      userDoc.collection('accounts').doc(targetAcc.id.toString()).update({'balance': EncryptionService.encryptDouble(targetBal)});
     }
 
-    transactions.add(newTxn);
-    // Sort
-    transactions.sort((a, b) => b.date.compareTo(a.date));
+    userDoc.collection('transactions').doc(newTxn.id).set(newTxn.toMap());
 
-    _box.put('transactions', transactions);
-    _box.put('accounts', accounts);
     Navigator.pop(context);
   }
 
@@ -2158,13 +2541,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
     if (amt <= 0) return;
 
-    // Check validation state directly
     if (_splitErrorText != null) {
-      // Error is already shown inline, but prevent add
       return;
     }
 
-    // Double check logic just in case
     final currentTotal =
     _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     if ((currentTotal + amt) > totalAmount + 0.01) {
@@ -2180,7 +2560,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
           category: _selectedCategory,
           subCategory: _selectedSubCategory));
       _splitAmountCtrl.clear();
-      _splitErrorText = null; // Clear error after successful add
+      _splitErrorText = null;
     });
   }
 
@@ -2236,10 +2616,12 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                           _selectedCategory = 'Salary';
                           _selectedSubCategory = null;
                         } else if (_selectedType == TransactionType.expense) {
-                          _selectedCategory = _expenseCategories.keys.first;
-                          _selectedSubCategory =
-                              _expenseCategories[_selectedCategory]
-                                  ?.firstOrNull;
+                          if (_expenseCategories.isNotEmpty) {
+                            _selectedCategory = _expenseCategories.keys.first;
+                            _selectedSubCategory =
+                                _expenseCategories[_selectedCategory]
+                                    ?.firstOrNull;
+                          }
                         }
                       }),
                       child: Container(
@@ -2471,8 +2853,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                   decoration: InputDecoration(
                                       hintText:
                                       'Remaining: ${remaining.toStringAsFixed(2)}',
-                                      errorText:
-                                      _splitErrorText, // Show inline error
+                                      errorText: _splitErrorText,
                                       isDense: true))),
                           TextButton(
                               onPressed: _addSplit, child: const Text('Add'))
@@ -2561,7 +2942,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   }
 }
 
-// --- TYPE ADAPTERS ---
+// --- TYPE ADAPTERS (Kept for Migration) ---
 
 class AccountTypeAdapter extends TypeAdapter<AccountType> {
   @override
@@ -2636,7 +3017,6 @@ class TransactionAdapter extends TypeAdapter<Transaction> {
     final category = reader.readString();
     final subCategory = reader.readBool() ? reader.readString() : null;
     final date = DateTime.fromMillisecondsSinceEpoch(reader.readInt());
-    // Fixed: Added .toList() to ensure the list is modifiable and not a read-only view
     final splits = reader.readBool()
         ? (reader.readList().cast<TransactionSplit>().toList())
         : null;
