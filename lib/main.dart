@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:encrypt/encrypt.dart' as enc;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,53 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+
+// --- ENCRYPTION SERVICE ---
+
+class EncryptionService {
+  // FIXED KEY for consistent decryption across devices without complex key exchange.
+  // 32 characters for AES-256.
+  static final _key = enc.Key.fromUtf8('ExpenseTrackerSecureKey2024Ver01');
+  static final _encrypter = enc.Encrypter(enc.AES(_key));
+
+  static String encrypt(String plainText) {
+    if (plainText.isEmpty) return plainText;
+    final iv = enc.IV.fromSecureRandom(16);
+    final encrypted = _encrypter.encrypt(plainText, iv: iv);
+    return "${iv.base64}:${encrypted.base64}";
+  }
+
+  static String decrypt(String encryptedText) {
+    if (encryptedText.isEmpty) return encryptedText;
+    try {
+      final parts = encryptedText.split(':');
+      if (parts.length != 2) return encryptedText; // Assume plain text fallback
+
+      final iv = enc.IV.fromBase64(parts[0]);
+      final encrypted = enc.Encrypted.fromBase64(parts[1]);
+      return _encrypter.decrypt(encrypted, iv: iv);
+    } catch (e) {
+      // If decryption fails, return original text (fallback for plaintext legacy data)
+      return encryptedText;
+    }
+  }
+
+  // Helper to handle double encryption
+  static String encryptDouble(double value) => encrypt(value.toString());
+
+  static double decryptDouble(dynamic value) {
+    if (value is num) return value.toDouble(); // Legacy plain number
+    if (value is String) {
+      try {
+        String decrypted = decrypt(value);
+        return double.tryParse(decrypted) ?? 0.0;
+      } catch (_) {
+        return 0.0;
+      }
+    }
+    return 0.0;
+  }
+}
 
 // --- 1. Data Models & Adapters ---
 
@@ -37,8 +85,8 @@ class Account {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'name': name,
-      'balance': balance,
+      'name': EncryptionService.encrypt(name),
+      'balance': EncryptionService.encryptDouble(balance),
       'type': type.index,
       'createdDate': Timestamp.fromDate(createdDate),
     };
@@ -47,8 +95,8 @@ class Account {
   factory Account.fromMap(Map<String, dynamic> map) {
     return Account(
       id: map['id'],
-      name: map['name'],
-      balance: (map['balance'] as num).toDouble(),
+      name: EncryptionService.decrypt(map['name']),
+      balance: EncryptionService.decryptDouble(map['balance']),
       type: AccountType.values[map['type']],
       createdDate: (map['createdDate'] as Timestamp).toDate(),
     );
@@ -91,17 +139,20 @@ class TransactionSplit {
 
   Map<String, dynamic> toMap() {
     return {
-      'amount': amount,
-      'category': category,
-      'subCategory': subCategory,
+      'amount': EncryptionService.encryptDouble(amount),
+      'category': EncryptionService.encrypt(category),
+      'subCategory':
+      subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
     };
   }
 
   factory TransactionSplit.fromMap(Map<String, dynamic> map) {
     return TransactionSplit(
-      amount: (map['amount'] as num).toDouble(),
-      category: map['category'],
-      subCategory: map['subCategory'],
+      amount: EncryptionService.decryptDouble(map['amount']),
+      category: EncryptionService.decrypt(map['category']),
+      subCategory: map['subCategory'] != null
+          ? EncryptionService.decrypt(map['subCategory'])
+          : null,
     );
   }
 }
@@ -136,36 +187,41 @@ class Transaction {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'amount': amount,
-      'fee': fee,
+      'amount': EncryptionService.encryptDouble(amount),
+      'fee': EncryptionService.encryptDouble(fee),
       'type': type.index,
       'sourceAccountId': sourceAccountId,
       'targetAccountId': targetAccountId,
-      'category': category,
-      'subCategory': subCategory,
+      'category': EncryptionService.encrypt(category),
+      'subCategory':
+      subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
       'date': Timestamp.fromDate(date),
       'splits': splits?.map((s) => s.toMap()).toList(),
-      'note': note,
+      'note': note != null ? EncryptionService.encrypt(note!) : null,
     };
   }
 
   factory Transaction.fromMap(Map<String, dynamic> map) {
     return Transaction(
       id: map['id'],
-      amount: (map['amount'] as num).toDouble(),
-      fee: (map['fee'] as num?)?.toDouble() ?? 0.0,
+      amount: EncryptionService.decryptDouble(map['amount']),
+      fee: EncryptionService.decryptDouble(map['fee']),
       type: TransactionType.values[map['type']],
       sourceAccountId: map['sourceAccountId'],
       targetAccountId: map['targetAccountId'],
-      category: map['category'],
-      subCategory: map['subCategory'],
+      category: EncryptionService.decrypt(map['category']),
+      subCategory: map['subCategory'] != null
+          ? EncryptionService.decrypt(map['subCategory'])
+          : null,
       date: (map['date'] as Timestamp).toDate(),
       splits: map['splits'] != null
           ? (map['splits'] as List)
           .map((s) => TransactionSplit.fromMap(s))
           .toList()
           : null,
-      note: map['note'],
+      note: map['note'] != null
+          ? EncryptionService.decrypt(map['note'])
+          : null,
     );
   }
 }
@@ -1712,10 +1768,18 @@ class TransactionItem extends StatelessWidget {
       } else if (txn.type == TransactionType.income) {
         newBalance -= txn.amount;
       }
+      // Note: EncryptionService handles double -> encrypted string inside the model's toMap().
+      // However, for updates, we often need to set specific fields.
+      // Since toMap handles encryption, we can create a temporary Account object and use toMap,
+      // or manually encrypt here.
+
+      // Let's create a temp object update logic via `userDoc` which is cleaner.
+      // But `update` requires a Map.
+
       userDoc
           .collection('accounts')
           .doc(sourceAccount.id.toString())
-          .update({'balance': newBalance});
+          .update({'balance': EncryptionService.encryptDouble(newBalance)});
     }
 
     if (txn.type == TransactionType.transfer && txn.targetAccountId != null) {
@@ -1728,10 +1792,11 @@ class TransactionItem extends StatelessWidget {
               type: AccountType.cash,
               createdDate: DateTime.now()));
       if (targetAccount.id != -1) {
+        double newBal = targetAccount.balance - txn.amount;
         userDoc
             .collection('accounts')
             .doc(targetAccount.id.toString())
-            .update({'balance': targetAccount.balance - txn.amount});
+            .update({'balance': EncryptionService.encryptDouble(newBal)});
       }
     }
 
@@ -2361,7 +2426,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
         else if (oldTxn.type == TransactionType.income)
           newBal -= oldTxn.amount;
 
-        userDoc.collection('accounts').doc(widget.accounts[sIdx].id.toString()).update({'balance': newBal});
+        userDoc.collection('accounts').doc(widget.accounts[sIdx].id.toString()).update({'balance': EncryptionService.encryptDouble(newBal)});
       }
       if (oldTxn.type == TransactionType.transfer &&
           oldTxn.targetAccountId != null) {
@@ -2369,7 +2434,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             .indexWhere((a) => a.id == oldTxn.targetAccountId);
         if (tIdx != -1) {
           double newBal = widget.accounts[tIdx].balance - oldTxn.amount;
-          userDoc.collection('accounts').doc(widget.accounts[tIdx].id.toString()).update({'balance': newBal});
+          userDoc.collection('accounts').doc(widget.accounts[tIdx].id.toString()).update({'balance': EncryptionService.encryptDouble(newBal)});
         }
       }
     }
@@ -2395,31 +2460,30 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       note: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
     );
 
-    // Update new balance logic. Note: Since we are using streams, we can't update local list and expect it to persist.
-    // We must update firestore documents.
-    // However, fetching fresh balance is safer. But for now we calculate based on passed accounts (snapshot state).
-    // Better logic: Transactional update. But simplicity: Just update based on known state.
+    // Update new balance logic.
+    // Fetch current balance from accounts snapshot passed in widget to ensure we encrypt the latest visible value +/- delta.
 
-    // NOTE: This relies on the fact that 'widget.accounts' might be stale if updates happened rapidly.
-    // In a real app, use Firestore Transactions. For this demo, standard updates are acceptable.
+    // Note: Since we are encrypting, we can't use FieldValue.increment easily (server doesn't know how to decrypt).
+    // We must read-modify-write.
+    // Luckily we have the latest account state from the stream in `widget.accounts`.
 
-    // Calculate delta for source account
-    // We need to re-fetch the account to be safe or just apply delta.
-    // Firestore `FieldValue.increment` is best.
-
-    final sourceRef = userDoc.collection('accounts').doc(newTxn.sourceAccountId.toString());
+    Account sourceAcc = widget.accounts.firstWhere((a) => a.id == newTxn.sourceAccountId);
+    double sourceBal = sourceAcc.balance;
 
     if (newTxn.type == TransactionType.expense) {
-      sourceRef.update({'balance': FieldValue.increment(-newTxn.amount)});
+      sourceBal -= newTxn.amount;
     } else if (newTxn.type == TransactionType.transfer) {
-      sourceRef.update({'balance': FieldValue.increment(-(newTxn.amount + newTxn.fee))});
+      sourceBal -= (newTxn.amount + newTxn.fee);
     } else if (newTxn.type == TransactionType.income) {
-      sourceRef.update({'balance': FieldValue.increment(newTxn.amount)});
+      sourceBal += newTxn.amount;
     }
+    userDoc.collection('accounts').doc(sourceAcc.id.toString()).update({'balance': EncryptionService.encryptDouble(sourceBal)});
+
 
     if (newTxn.type == TransactionType.transfer && newTxn.targetAccountId != null) {
-      final targetRef = userDoc.collection('accounts').doc(newTxn.targetAccountId.toString());
-      targetRef.update({'balance': FieldValue.increment(newTxn.amount)});
+      Account targetAcc = widget.accounts.firstWhere((a) => a.id == newTxn.targetAccountId);
+      double targetBal = targetAcc.balance + newTxn.amount;
+      userDoc.collection('accounts').doc(targetAcc.id.toString()).update({'balance': EncryptionService.encryptDouble(targetBal)});
     }
 
     userDoc.collection('transactions').doc(newTxn.id).set(newTxn.toMap());
