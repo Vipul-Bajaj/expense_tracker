@@ -2669,6 +2669,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   final List<TransactionSplit> _currentSplits = [];
   final TextEditingController _splitAmountCtrl = TextEditingController();
   String? _splitErrorText;
+  String? _submitErrorText;
 
   Map<String, List<String>> _expenseCategories = {};
   final List<String> _incomeCategories = [
@@ -2796,6 +2797,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   void _save() {
     final user = AuthService.currentUser;
     if (user == null) return;
+    setState(() => _submitErrorText = null); // Reset error
 
     final double amount = double.tryParse(_amountCtrl.text) ?? 0;
     final double fee = double.tryParse(_feeCtrl.text) ?? 0;
@@ -2804,8 +2806,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     if (_selectedType == TransactionType.expense && _isSplitMode) {
       final splitTotal = _currentSplits.fold(0.0, (sum, s) => sum + s.amount);
       if ((splitTotal - amount).abs() > 0.01) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Split total must match Amount")));
+        setState(() {
+          _submitErrorText =
+          "Split total (${splitTotal.toStringAsFixed(2)}) != Amount (${amount.toStringAsFixed(2)})";
+        });
         return;
       }
     }
@@ -2934,9 +2938,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     final currentTotal =
     _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     if ((currentTotal + amt) > totalAmount + 0.01) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              "Split exceeds total! Remaining: ₹${(totalAmount - currentTotal).toStringAsFixed(2)}")));
+      setState(() {
+        _splitErrorText =
+        "Exceeds total! Rem: ₹${(totalAmount - currentTotal).toStringAsFixed(2)}";
+      });
       return;
     }
 
@@ -3303,6 +3308,15 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 prefixIcon: Icon(Icons.note_alt_outlined, color: Colors.grey),
               ),
             ),
+            if (_submitErrorText != null) ...[
+              const SizedBox(height: 16),
+              Center(
+                  child: Text(_submitErrorText!,
+                      style: GoogleFonts.inter(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12))),
+            ],
             const SizedBox(height: 32),
             SizedBox(
                 width: double.infinity,
