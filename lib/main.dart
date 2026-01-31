@@ -67,6 +67,9 @@ enum AccountType { bank, wallet, credit, cash }
 
 enum TransactionType { expense, transfer, income }
 
+// Added for Recurring Transactions
+enum RecurrenceFrequency { none, daily, weekly, monthly, yearly }
+
 class Account {
   final int id;
   final String name;
@@ -169,6 +172,7 @@ class Transaction {
   final DateTime date;
   final List<TransactionSplit>? splits;
   final String? note;
+  final RecurrenceFrequency recurrence; // Added field
 
   Transaction({
     required this.id,
@@ -182,6 +186,7 @@ class Transaction {
     required this.date,
     this.splits,
     this.note,
+    this.recurrence = RecurrenceFrequency.none, // Default
   });
 
   Map<String, dynamic> toMap() {
@@ -198,6 +203,7 @@ class Transaction {
       'date': Timestamp.fromDate(date),
       'splits': splits?.map((s) => s.toMap()).toList(),
       'note': note != null ? EncryptionService.encrypt(note!) : null,
+      'recurrence': recurrence.index, // Save enum index
     };
   }
 
@@ -220,6 +226,9 @@ class Transaction {
           .toList()
           : null,
       note: map['note'] != null ? EncryptionService.decrypt(map['note']) : null,
+      recurrence: map['recurrence'] != null
+          ? RecurrenceFrequency.values[map['recurrence']]
+          : RecurrenceFrequency.none,
     );
   }
 }
@@ -969,34 +978,32 @@ class TransactionsTab extends StatefulWidget {
 }
 
 class _TransactionsTabState extends State<TransactionsTab> {
-  DateTime _selectedDate = DateTime.now();
-  bool _filterBySpecificDate =
-  false; // false = Month View, true = Specific Day View
+  DateTimeRange? _selectedDateRange;
   String? _selectedCategory;
   String? _selectedSubCategory;
+  bool _isSearchVisible = false;
+  final TextEditingController _searchCtrl = TextEditingController();
 
-  void _changeDate(int offset) {
-    setState(() {
-      if (_filterBySpecificDate) {
-        _selectedDate = _selectedDate.add(Duration(days: offset));
-      } else {
-        _selectedDate =
-            DateTime(_selectedDate.year, _selectedDate.month + offset);
-      }
-    });
+  @override
+  void initState() {
+    super.initState();
+    // Default to current month
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, 1);
+    final end = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+    _selectedDateRange = DateTimeRange(start: start, end: end);
   }
 
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
+  void _pickDateRange() async {
+    final picked = await showDateRangePicker(
       context: context,
-      initialDate: _selectedDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDateRange: _selectedDateRange,
     );
     if (picked != null) {
       setState(() {
-        _selectedDate = picked;
-        _filterBySpecificDate = true;
+        _selectedDateRange = picked;
       });
     }
   }
@@ -1118,17 +1125,30 @@ class _TransactionsTabState extends State<TransactionsTab> {
   Widget build(BuildContext context) {
     // 1. Filter Transactions
     final filtered = widget.transactions.where((t) {
-      // Date Filter
-      bool dateMatch;
-      if (_filterBySpecificDate) {
-        dateMatch = t.date.year == _selectedDate.year &&
-            t.date.month == _selectedDate.month &&
-            t.date.day == _selectedDate.day;
-      } else {
-        dateMatch = t.date.year == _selectedDate.year &&
-            t.date.month == _selectedDate.month;
+      // Date Range Filter
+      if (_selectedDateRange != null) {
+        final start = DateTime(_selectedDateRange!.start.year,
+            _selectedDateRange!.start.month, _selectedDateRange!.start.day);
+        final end = DateTime(
+            _selectedDateRange!.end.year,
+            _selectedDateRange!.end.month,
+            _selectedDateRange!.end.day,
+            23,
+            59,
+            59);
+        if (t.date.isBefore(start) || t.date.isAfter(end)) {
+          return false;
+        }
       }
-      if (!dateMatch) return false;
+
+      // Search Filter
+      if (_searchCtrl.text.isNotEmpty) {
+        final query = _searchCtrl.text.toLowerCase();
+        final noteMatch = t.note?.toLowerCase().contains(query) ?? false;
+        final catMatch = t.category.toLowerCase().contains(query);
+        final subMatch = t.subCategory?.toLowerCase().contains(query) ?? false;
+        if (!noteMatch && !catMatch && !subMatch) return false;
+      }
 
       // Category Filter
       if (_selectedCategory == null) return true;
@@ -1156,10 +1176,31 @@ class _TransactionsTabState extends State<TransactionsTab> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: Text("Transactions",
+        title: _isSearchVisible
+            ? TextField(
+          controller: _searchCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: "Search transactions...",
+            border: InputBorder.none,
+          ),
+          onChanged: (val) => setState(() {}),
+        )
+            : Text("Transactions",
             style: GoogleFonts.inter(
-                fontWeight: FontWeight.bold, color: Colors.blueGrey.shade800)),
+                fontWeight: FontWeight.bold,
+                color: Colors.blueGrey.shade800)),
         actions: [
+          IconButton(
+            icon: Icon(_isSearchVisible ? Icons.close : Icons.search),
+            color: Colors.blueGrey.shade700,
+            onPressed: () {
+              setState(() {
+                _isSearchVisible = !_isSearchVisible;
+                if (!_isSearchVisible) _searchCtrl.clear();
+              });
+            },
+          ),
           Stack(
             children: [
               IconButton(
@@ -1198,13 +1239,9 @@ class _TransactionsTabState extends State<TransactionsTab> {
             ),
             child: Row(
               children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  onPressed: () => _changeDate(-1),
-                ),
                 Expanded(
                   child: GestureDetector(
-                    onTap: _pickDate,
+                    onTap: _pickDateRange,
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
@@ -1219,40 +1256,27 @@ class _TransactionsTabState extends State<TransactionsTab> {
                               size: 14, color: Colors.blueGrey),
                           const SizedBox(width: 8),
                           Text(
-                            _filterBySpecificDate
-                                ? DateFormat('dd MMM yyyy')
-                                .format(_selectedDate)
-                                : DateFormat('MMMM yyyy').format(_selectedDate),
+                            _selectedDateRange != null
+                                ? "${DateFormat('dd MMM').format(_selectedDateRange!.start)} - ${DateFormat('dd MMM yyyy').format(_selectedDateRange!.end)}"
+                                : "All Time",
                             style: GoogleFonts.inter(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 14,
                                 color: Colors.blueGrey.shade800),
                           ),
-                          if (_filterBySpecificDate) ...[
-                            const SizedBox(width: 8),
-                            Text("(Day View)",
-                                style: GoogleFonts.inter(
-                                    fontSize: 10,
-                                    color: Colors.blue.shade600,
-                                    fontWeight: FontWeight.bold))
-                          ]
                         ],
                       ),
                     ),
                   ),
                 ),
-                if (_filterBySpecificDate)
+                if (_selectedDateRange != null)
                   IconButton(
                     icon: const Icon(Icons.close),
-                    tooltip: "Switch to Month View",
-                    onPressed: () =>
-                        setState(() => _filterBySpecificDate = false),
+                    tooltip: "Clear Date Filter",
+                    onPressed: () => setState(() {
+                      _selectedDateRange = null;
+                    }),
                   )
-                else
-                  IconButton(
-                    icon: const Icon(Icons.chevron_right),
-                    onPressed: () => _changeDate(1),
-                  ),
               ],
             ),
           ),
@@ -2266,6 +2290,11 @@ class TransactionItem extends StatelessWidget {
               _detailRow("Amount", formatCurrency.format(transaction.amount)),
               if (transaction.fee > 0)
                 _detailRow("Fee", formatCurrency.format(transaction.fee)),
+              if (transaction.recurrence != RecurrenceFrequency.none)
+                _detailRow(
+                    "Recurring",
+                    transaction.recurrence.name[0].toUpperCase() +
+                        transaction.recurrence.name.substring(1)),
               const Divider(),
               if (transaction.type == TransactionType.expense) ...[
                 if (transaction.splits != null &&
@@ -2365,15 +2394,26 @@ class TransactionItem extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                      isTransfer
-                          ? 'Wallet Transfer'
-                          : (isIncome
-                          ? 'Income'
-                          : (isSplit
-                          ? 'Split Expense'
-                          : transaction.category)),
-                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  Row(
+                    children: [
+                      Text(
+                          isTransfer
+                              ? 'Wallet Transfer'
+                              : (isIncome
+                              ? 'Income'
+                              : (isSplit
+                              ? 'Split Expense'
+                              : transaction.category)),
+                          style:
+                          GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                      if (transaction.recurrence != RecurrenceFrequency.none)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6.0),
+                          child:
+                          Icon(Icons.repeat, size: 14, color: Colors.grey),
+                        ),
+                    ],
+                  ),
                   Wrap(
                     crossAxisAlignment: WrapCrossAlignment.center,
                     spacing: 4,
@@ -2698,6 +2738,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   final TextEditingController _splitAmountCtrl = TextEditingController();
   String? _splitErrorText;
   String? _submitErrorText;
+  RecurrenceFrequency _recurrence = RecurrenceFrequency.none; // Recurring
 
   Map<String, List<String>> _expenseCategories = {};
   final List<String> _incomeCategories = [
@@ -2737,6 +2778,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       _selectedCategory = t.category;
       _selectedSubCategory = t.subCategory;
       _selectedDate = t.date;
+      _recurrence = t.recurrence; // Load recurring
       if (t.splits != null && t.splits!.isNotEmpty) {
         _isSplitMode = true;
         _currentSplits.addAll(t.splits!);
@@ -2896,6 +2938,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       date: _selectedDate,
       splits: _isSplitMode ? _currentSplits : null,
       note: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
+      recurrence: _recurrence, // Save recurrence
     );
 
     // Update new balance logic.
@@ -3336,6 +3379,37 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 prefixIcon: Icon(Icons.note_alt_outlined, color: Colors.grey),
               ),
             ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<RecurrenceFrequency>(
+              value: _recurrence,
+              decoration: const InputDecoration(
+                labelText: "REPEAT",
+                border: InputBorder.none,
+                prefixIcon: Icon(Icons.repeat, color: Colors.grey),
+              ),
+              items: RecurrenceFrequency.values.map((freq) {
+                String label;
+                switch (freq) {
+                  case RecurrenceFrequency.none:
+                    label = "Never";
+                    break;
+                  case RecurrenceFrequency.daily:
+                    label = "Daily";
+                    break;
+                  case RecurrenceFrequency.weekly:
+                    label = "Weekly";
+                    break;
+                  case RecurrenceFrequency.monthly:
+                    label = "Monthly";
+                    break;
+                  case RecurrenceFrequency.yearly:
+                    label = "Yearly";
+                    break;
+                }
+                return DropdownMenuItem(value: freq, child: Text(label));
+              }).toList(),
+              onChanged: (val) => setState(() => _recurrence = val!),
+            ),
             if (_submitErrorText != null) ...[
               const SizedBox(height: 16),
               Center(
@@ -3468,6 +3542,7 @@ class TransactionAdapter extends TypeAdapter<Transaction> {
       date: date,
       splits: splits,
       note: note,
+      recurrence: RecurrenceFrequency.none, // Default
     );
   }
 
