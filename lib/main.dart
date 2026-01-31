@@ -2227,6 +2227,19 @@ class TransactionItem extends StatelessWidget {
             createdDate: DateTime.now()))
         .name;
 
+    String? targetAccountName;
+    if (transaction.targetAccountId != null) {
+      targetAccountName = accounts
+          .firstWhere((a) => a.id == transaction.targetAccountId,
+          orElse: () => Account(
+              id: -1,
+              name: 'Unknown',
+              balance: 0,
+              type: AccountType.cash,
+              createdDate: DateTime.now()))
+          .name;
+    }
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2243,7 +2256,13 @@ class TransactionItem extends StatelessWidget {
                       transaction.type.name.substring(1)),
               _detailRow("Date",
                   DateFormat('dd MMM yyyy, hh:mm a').format(transaction.date)),
-              _detailRow("Account", accountName),
+              _detailRow(
+                  transaction.type == TransactionType.transfer
+                      ? "From Account"
+                      : "Account",
+                  accountName),
+              if (targetAccountName != null)
+                _detailRow("To Account", targetAccountName),
               _detailRow("Amount", formatCurrency.format(transaction.amount)),
               if (transaction.fee > 0)
                 _detailRow("Fee", formatCurrency.format(transaction.fee)),
@@ -2295,7 +2314,7 @@ class TransactionItem extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 80,
+            width: 90, // Slightly increased for "From Account"
             child: Text(label,
                 style: GoogleFonts.inter(
                     color: Colors.grey.shade600, fontSize: 13)),
@@ -2355,24 +2374,33 @@ class TransactionItem extends StatelessWidget {
                           ? 'Split Expense'
                           : transaction.category)),
                       style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                  Row(
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 4,
                     children: [
                       Text(DateFormat('dd MMM').format(transaction.date),
                           style: GoogleFonts.inter(
                               fontSize: 11, color: Colors.blueGrey.shade400)),
+                      if (isTransfer && transaction.targetAccountId != null)
+                        Text(
+                            '• To: ${accounts.firstWhere((a) => a.id == transaction.targetAccountId, orElse: () => Account(id: -1, name: 'Unknown', balance: 0, type: AccountType.cash, createdDate: DateTime.now())).name}',
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: Colors.blueGrey.shade400,
+                                fontWeight: FontWeight.bold)),
                       if (transaction.subCategory != null &&
                           !isTransfer &&
                           !isSplit &&
                           !isIncome)
-                        Text(' • ${transaction.subCategory}',
+                        Text('• ${transaction.subCategory}',
                             style: GoogleFonts.inter(
                                 fontSize: 11, color: Colors.blueGrey.shade400)),
                       if (isSplit)
-                        Text(' • ${transaction.splits!.length} items',
+                        Text('• ${transaction.splits!.length} items',
                             style: GoogleFonts.inter(
                                 fontSize: 11, color: Colors.blueGrey.shade400)),
                       if (transaction.fee > 0)
-                        Text(' • Fee: ${transaction.fee}',
+                        Text('• Fee: ${transaction.fee}',
                             style: GoogleFonts.inter(
                                 fontSize: 10, color: Colors.red.shade400)),
                     ],
