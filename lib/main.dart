@@ -1212,12 +1212,25 @@ class _TransactionsTabState extends State<TransactionsTab> {
   }
 
   void _showFilterSheet() {
+    // Sort lists for display
+    final sortedAccounts = List<Account>.from(widget.accounts)
+      ..sort((a, b) => a.name.compareTo(b.name));
+    final sortedCategories = widget.categories.keys.toList()..sort();
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => StatefulBuilder(builder: (context, setModalState) {
+        // Sort subcategories if category selected
+        List<String>? sortedSubCategories;
+        if (_selectedCategory != null &&
+            widget.categories[_selectedCategory] != null) {
+          sortedSubCategories =
+          List<String>.from(widget.categories[_selectedCategory]!)..sort();
+        }
+
         return Container(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -1285,7 +1298,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                 items: [
                   const DropdownMenuItem(
                       value: null, child: Text("All Accounts")),
-                  ...widget.accounts.map((a) =>
+                  ...sortedAccounts.map((a) =>
                       DropdownMenuItem(value: a.id, child: Text(a.name))),
                 ],
                 onChanged: (val) {
@@ -1307,7 +1320,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                 items: [
                   const DropdownMenuItem(
                       value: null, child: Text("All Categories")),
-                  ...widget.categories.keys
+                  ...sortedCategories
                       .map((c) => DropdownMenuItem(value: c, child: Text(c))),
                 ],
                 onChanged: (val) {
@@ -1321,8 +1334,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                   });
                 },
               ),
-              if (_selectedCategory != null &&
-                  widget.categories[_selectedCategory] != null) ...[
+              if (_selectedCategory != null && sortedSubCategories != null) ...[
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   value: _selectedSubCategory,
@@ -1337,8 +1349,8 @@ class _TransactionsTabState extends State<TransactionsTab> {
                   items: [
                     const DropdownMenuItem(
                         value: null, child: Text("All Sub-Categories")),
-                    ...widget.categories[_selectedCategory]!
-                        .map((s) => DropdownMenuItem(value: s, child: Text(s))),
+                    ...sortedSubCategories.map(
+                            (s) => DropdownMenuItem(value: s, child: Text(s))),
                   ],
                   onChanged: (val) {
                     setModalState(() => _selectedSubCategory = val);
@@ -1763,6 +1775,19 @@ class AccountsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Sort accounts alphabetically
+    final sortedAccounts = List<Account>.from(accounts)
+      ..sort((a, b) => a.name.compareTo(b.name));
+
+    // Group accounts by type
+    final Map<AccountType, List<Account>> groupedAccounts = {};
+    for (var type in AccountType.values) {
+      groupedAccounts[type] = [];
+    }
+    for (var acc in sortedAccounts) {
+      groupedAccounts[acc.type]?.add(acc);
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -1779,64 +1804,77 @@ class AccountsTab extends StatelessWidget {
           ? Center(
           child: Text("No accounts yet",
               style: GoogleFonts.inter(color: Colors.grey)))
-          : ListView.separated(
+          : ListView(
         padding: const EdgeInsets.all(20),
-        itemCount: accounts.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final acc = accounts[index];
-          return GestureDetector(
-            onTap: () => _showAccountDetails(context, acc), // Add tap
-            onLongPress: () => _showAccountSheet(context, account: acc),
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.blueGrey.shade50)),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                        color: acc.color.withOpacity(0.1),
-                        shape: BoxShape.circle),
-                    child: Icon(acc.icon, color: acc.color, size: 24),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(acc.name,
-                            style: GoogleFonts.inter(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.blueGrey.shade800)),
-                        Text(acc.type.name.toUpperCase(),
-                            style: GoogleFonts.inter(
-                                fontSize: 11,
-                                color: Colors.blueGrey.shade400,
-                                fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                  Text(
-                    NumberFormat.currency(
-                        locale: 'en_IN',
-                        symbol: '₹',
-                        decimalDigits: 2)
-                        .format(acc.balance),
-                    style: GoogleFonts.inter(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blueGrey.shade900),
-                  ),
-                ],
+        children: AccountType.values.expand((type) {
+          final typeAccounts = groupedAccounts[type]!;
+          if (typeAccounts.isEmpty) return <Widget>[];
+          return [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Text(
+                type.name[0].toUpperCase() + type.name.substring(1),
+                style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blueGrey.shade400),
               ),
             ),
-          );
-        },
+            ...typeAccounts.map((acc) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: GestureDetector(
+                onTap: () => _showAccountDetails(context, acc),
+                onLongPress: () => _showAccountSheet(context, account: acc),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border:
+                      Border.all(color: Colors.blueGrey.shade50)),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                            color: acc.color.withOpacity(0.1),
+                            shape: BoxShape.circle),
+                        child: Icon(acc.icon,
+                            color: acc.color, size: 24),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            Text(acc.name,
+                                style: GoogleFonts.inter(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.blueGrey.shade800)),
+                            // Removed type text since it's now a section header
+                          ],
+                        ),
+                      ),
+                      Text(
+                        NumberFormat.currency(
+                            locale: 'en_IN',
+                            symbol: '₹',
+                            decimalDigits: 2)
+                            .format(acc.balance),
+                        style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueGrey.shade900),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ))
+          ];
+        }).toList(),
       ),
     );
   }
@@ -2496,6 +2534,9 @@ class _CategoriesTabState extends State<CategoriesTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Sort categories alphabetically
+    final sortedCategories = widget.categories.keys.toList()..sort();
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -2510,8 +2551,9 @@ class _CategoriesTabState extends State<CategoriesTab> {
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
-        children: widget.categories.keys.map((cat) {
-          final subs = widget.categories[cat]!;
+        children: sortedCategories.map((cat) {
+          // Sort subcategories alphabetically
+          final subs = List<String>.from(widget.categories[cat]!)..sort();
           return Card(
             margin: const EdgeInsets.only(bottom: 12),
             elevation: 0,
@@ -3163,6 +3205,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   @override
   void initState() {
     super.initState();
+    _incomeCategories.sort(); // Sort income categories
     _fetchCategories();
 
     _splitAmountCtrl.addListener(_validateSplitAmount);
@@ -3208,8 +3251,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
           _expenseCategories = (doc.data()!['data'] as Map).map((k, v) =>
               MapEntry(
                   k.toString(), (v as List).map((e) => e.toString()).toList()));
+
           if (_selectedCategory.isEmpty && _expenseCategories.isNotEmpty) {
-            _selectedCategory = _expenseCategories.keys.first;
+            // Pick first alphabetically
+            final sortedKeys = _expenseCategories.keys.toList()..sort();
+            _selectedCategory = sortedKeys.first;
             _selectedSubCategory =
                 _expenseCategories[_selectedCategory]?.firstOrNull;
           }
@@ -3223,7 +3269,9 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             'Transport': ['Fuel', 'Taxi', 'Public', 'Repair'],
             'Shopping': ['Clothes', 'Electronics', 'Home', 'Gifts'],
           };
-          _selectedCategory = _expenseCategories.keys.first;
+          // Pick first alphabetically
+          final sortedKeys = _expenseCategories.keys.toList()..sort();
+          _selectedCategory = sortedKeys.first;
           _selectedSubCategory =
               _expenseCategories[_selectedCategory]?.firstOrNull;
         });
@@ -3439,6 +3487,19 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     _currentSplits.fold(0, (sum, item) => sum + item.amount);
     final double remaining = totalAmount - currentSplitTotal;
 
+    // Sort accounts for dropdown
+    final sortedAccounts = List<Account>.from(widget.accounts)
+      ..sort((a, b) => a.name.compareTo(b.name));
+
+    // Sort categories for display
+    final sortedExpenseCategories = _expenseCategories.keys.toList()..sort();
+
+    // Sort subcategories if category selected
+    List<String> sortedSubCategories = [];
+    if (_selectedCategory.isNotEmpty && _expenseCategories[_selectedCategory] != null) {
+      sortedSubCategories = List<String>.from(_expenseCategories[_selectedCategory]!)..sort();
+    }
+
     return Container(
       padding: EdgeInsets.fromLTRB(
           24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
@@ -3562,7 +3623,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 value: _selectedSourceId,
                 isExpanded: true,
                 underline: const SizedBox(),
-                items: widget.accounts
+                items: sortedAccounts
                     .map((a) =>
                     DropdownMenuItem(value: a.id, child: Text(a.name)))
                     .toList(),
@@ -3581,7 +3642,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                   value: _selectedTargetId,
                   isExpanded: true,
                   underline: const SizedBox(),
-                  items: widget.accounts
+                  items: sortedAccounts
                       .where((a) => a.id != _selectedSourceId)
                       .map((a) =>
                       DropdownMenuItem(value: a.id, child: Text(a.name)))
@@ -3674,15 +3735,19 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                   value: _selectedCategory,
                                   isExpanded: true,
                                   underline: const SizedBox(),
-                                  items: _expenseCategories.keys
+                                  items: sortedExpenseCategories
                                       .map((c) => DropdownMenuItem(
                                       value: c, child: Text(c)))
                                       .toList(),
                                   onChanged: (val) => setState(() {
                                     _selectedCategory = val!;
-                                    _selectedSubCategory =
-                                        _expenseCategories[val]
-                                            ?.firstOrNull;
+                                    final subs = _expenseCategories[val];
+                                    if (subs != null && subs.isNotEmpty) {
+                                      final sortedSubs = List<String>.from(subs)..sort();
+                                      _selectedSubCategory = sortedSubs.first;
+                                    } else {
+                                      _selectedSubCategory = null;
+                                    }
                                   }))),
                           const SizedBox(width: 8),
                           Expanded(
@@ -3691,9 +3756,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                   value: _selectedSubCategory,
                                   isExpanded: true,
                                   underline: const SizedBox(),
-                                  items:
-                                  (_expenseCategories[_selectedCategory] ??
-                                      [])
+                                  items: sortedSubCategories
                                       .map((s) => DropdownMenuItem(
                                       value: s, child: Text(s)))
                                       .toList(),
@@ -3730,7 +3793,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
-                        children: _expenseCategories.keys
+                        children: sortedExpenseCategories
                             .map((c) => Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: ChoiceChip(
@@ -3738,9 +3801,13 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 selected: _selectedCategory == c,
                                 onSelected: (val) => setState(() {
                                   _selectedCategory = c;
-                                  _selectedSubCategory =
-                                      _expenseCategories[c]
-                                          ?.firstOrNull;
+                                  final subs = _expenseCategories[c];
+                                  if (subs != null && subs.isNotEmpty) {
+                                    final sortedSubs = List<String>.from(subs)..sort();
+                                    _selectedSubCategory = sortedSubs.first;
+                                  } else {
+                                    _selectedSubCategory = null;
+                                  }
                                 }),
                                 selectedColor: Colors.blue.shade100)))
                             .toList())),
@@ -3756,7 +3823,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                   Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: _expenseCategories[_selectedCategory]!
+                      children: sortedSubCategories
                           .map((sub) => ChoiceChip(
                           label: Text(sub),
                           selected: _selectedSubCategory == sub,
