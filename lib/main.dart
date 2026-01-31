@@ -594,6 +594,146 @@ class MainAppScaffold extends StatefulWidget {
 
 class _MainAppScaffoldState extends State<MainAppScaffold> {
   int _currentIndex = 0;
+  bool _recurrenceChecked = false;
+
+  void _checkRecurringTransactions(
+      List<Transaction> transactions, List<Account> accounts, String userId) async {
+    if (_recurrenceChecked) return;
+    _recurrenceChecked = true;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final recurringTxns = transactions
+        .where((t) => t.recurrence != RecurrenceFrequency.none)
+        .toList();
+
+    final firestore = FirebaseFirestore.instance;
+    final batch = firestore.batch();
+    bool batchHasOps = false;
+
+    // Create a map for quick account lookup
+    final accountMap = {for (var a in accounts) a.id: a};
+
+    for (var txn in recurringTxns) {
+      DateTime nextDueDate = txn.date;
+
+      // Calculate next due date based on frequency until we reach or pass today
+      while (true) {
+        switch (txn.recurrence) {
+          case RecurrenceFrequency.daily:
+            nextDueDate = nextDueDate.add(const Duration(days: 1));
+            break;
+          case RecurrenceFrequency.weekly:
+            nextDueDate = nextDueDate.add(const Duration(days: 7));
+            break;
+          case RecurrenceFrequency.monthly:
+          // Handle month overflow carefully
+            int newMonth = nextDueDate.month + 1;
+            int newYear = nextDueDate.year;
+            if (newMonth > 12) {
+              newMonth = 1;
+              newYear++;
+            }
+            // Handle days like 31st Jan -> 28th Feb
+            int lastDay = DateTime(newYear, newMonth + 1, 0).day;
+            int newDay = min(txn.date.day, lastDay);
+            nextDueDate = DateTime(newYear, newMonth, newDay);
+            break;
+          case RecurrenceFrequency.yearly:
+          // Handle leap years
+            if (txn.date.month == 2 && txn.date.day == 29) {
+              // Check if next year is leap year, if not use 28th
+              final isLeap = (nextDueDate.year + 1) % 4 == 0 && ((nextDueDate.year + 1) % 100 != 0 || (nextDueDate.year + 1) % 400 == 0);
+              nextDueDate = DateTime(nextDueDate.year + 1, 2, isLeap ? 29 : 28);
+            } else {
+              nextDueDate = DateTime(nextDueDate.year + 1, nextDueDate.month, nextDueDate.day);
+            }
+            break;
+          case RecurrenceFrequency.none:
+            break;
+        }
+
+        // Stop if the calculated next due date is in the future (after today)
+        if (nextDueDate.isAfter(today)) break;
+
+        // Check if a transaction already exists for this recurrence on this specific date
+        // Logic: Same Category, Amount, Type, and Date (Year, Month, Day)
+        bool exists = transactions.any((t) =>
+        t.amount == txn.amount &&
+            t.category == txn.category &&
+            t.type == txn.type &&
+            t.date.year == nextDueDate.year &&
+            t.date.month == nextDueDate.month &&
+            t.date.day == nextDueDate.day);
+
+        if (!exists) {
+          // Create new transaction
+          final newTxnId = DateTime.now().millisecondsSinceEpoch.toString() +
+              Random().nextInt(1000).toString();
+
+          final newTxn = Transaction(
+            id: newTxnId,
+            amount: txn.amount,
+            fee: txn.fee,
+            type: txn.type,
+            sourceAccountId: txn.sourceAccountId,
+            targetAccountId: txn.targetAccountId,
+            category: txn.category,
+            subCategory: txn.subCategory,
+            date: nextDueDate, // The due date
+            splits: txn.splits,
+            note: "${txn.note ?? ''} (Recurring)",
+            recurrence: RecurrenceFrequency.none, // New instance is not the parent
+          );
+
+          // Add to batch
+          final txnRef = firestore
+              .collection('users')
+              .doc(userId)
+              .collection('transactions')
+              .doc(newTxn.id);
+          batch.set(txnRef, newTxn.toMap());
+          batchHasOps = true;
+
+          // Update Account Balances
+          final sourceAcc = accountMap[txn.sourceAccountId];
+          if (sourceAcc != null) {
+            double newBalance = sourceAcc.balance;
+            if (txn.type == TransactionType.expense) {
+              newBalance -= txn.amount;
+            } else if (txn.type == TransactionType.transfer) {
+              newBalance -= (txn.amount + txn.fee);
+            } else if (txn.type == TransactionType.income) {
+              newBalance += txn.amount;
+            }
+            // Update local object to reflect in next loop iteration if multiple recurring hit same account
+            sourceAcc.balance = newBalance;
+
+            final accRef = firestore.collection('users').doc(userId).collection('accounts').doc(sourceAcc.id.toString());
+            batch.update(accRef, {'balance': EncryptionService.encryptDouble(newBalance)});
+          }
+
+          if (txn.type == TransactionType.transfer && txn.targetAccountId != null) {
+            final targetAcc = accountMap[txn.targetAccountId];
+            if (targetAcc != null) {
+              targetAcc.balance += txn.amount;
+              final targetRef = firestore.collection('users').doc(userId).collection('accounts').doc(targetAcc.id.toString());
+              batch.update(targetRef, {'balance': EncryptionService.encryptDouble(targetAcc.balance)});
+            }
+          }
+        }
+      }
+    }
+
+    if (batchHasOps) {
+      await batch.commit();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Recurring transactions generated automatically.")),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -622,6 +762,11 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                 Transaction.fromMap(doc.data() as Map<String, dynamic>))
                 .toList()
                 : [];
+
+            // Check for recurring transactions once data is loaded
+            if (transactions.isNotEmpty && accounts.isNotEmpty && !_recurrenceChecked) {
+              Future.microtask(() => _checkRecurringTransactions(transactions, accounts, user.uid));
+            }
 
             return StreamBuilder<DocumentSnapshot>(
               stream: userDocRef
@@ -682,7 +827,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                       transactions: transactions,
                       accounts: accounts,
                       categories: categories),
-                  AccountsTab(accounts: accounts),
+                  AccountsTab(accounts: accounts, transactions: transactions), // Passed transactions
                   ReportsTab(accounts: accounts, transactions: transactions),
                   CategoriesTab(categories: categories),
                 ];
@@ -853,11 +998,18 @@ class _DashboardTabState extends State<DashboardTab> {
     }).toList();
     monthlyTransactions.sort((a, b) => b.date.compareTo(a.date));
 
+    final double monthlyIncome = monthlyTransactions.fold(0.0, (sum, t) {
+      if (t.type == TransactionType.income) return sum + t.amount;
+      return sum;
+    });
+
     final double monthlyExpense = monthlyTransactions.fold(0.0, (sum, t) {
       if (t.type == TransactionType.expense) return sum + t.amount;
       if (t.type == TransactionType.transfer) return sum + t.fee;
       return sum;
     });
+
+    final double monthlyTotal = monthlyIncome - monthlyExpense;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -922,15 +1074,65 @@ class _DashboardTabState extends State<DashboardTab> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Text('Total Expense',
+                Text('Total Balance',
                     style: GoogleFonts.inter(
                         color: Colors.blueGrey.shade400, fontSize: 14)),
                 const SizedBox(height: 4),
-                Text(_formatCurrency(monthlyExpense),
+                Text(_formatCurrency(monthlyTotal),
                     style: GoogleFonts.inter(
-                        color: Colors.blueGrey.shade900,
+                        color: monthlyTotal >= 0
+                            ? Colors.blueGrey.shade900
+                            : Colors.red.shade600,
                         fontSize: 36,
                         fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Column(
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.arrow_downward,
+                                size: 16, color: Colors.green),
+                            const SizedBox(width: 4),
+                            Text('Income',
+                                style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: Colors.blueGrey.shade400)),
+                          ],
+                        ),
+                        Text(_formatCurrency(monthlyIncome),
+                            style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green)),
+                      ],
+                    ),
+                    Container(
+                        height: 30, width: 1, color: Colors.grey.shade200),
+                    Column(
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.arrow_upward,
+                                size: 16, color: Colors.red),
+                            const SizedBox(width: 4),
+                            Text('Expense',
+                                style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: Colors.blueGrey.shade400)),
+                          ],
+                        ),
+                        Text(_formatCurrency(monthlyExpense),
+                            style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red)),
+                      ],
+                    ),
+                  ],
+                )
               ],
             ),
           ),
@@ -981,13 +1183,14 @@ class _TransactionsTabState extends State<TransactionsTab> {
   DateTimeRange? _selectedDateRange;
   String? _selectedCategory;
   String? _selectedSubCategory;
+  TransactionType? _selectedType;
+  int? _selectedAccountId;
   bool _isSearchVisible = false;
   final TextEditingController _searchCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    // Default to current month
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, 1);
     final end = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
@@ -1027,22 +1230,68 @@ class _TransactionsTabState extends State<TransactionsTab> {
                   Text("Filter Transactions",
                       style: GoogleFonts.inter(
                           fontWeight: FontWeight.bold, fontSize: 18)),
-                  if (_selectedCategory != null)
-                    TextButton(
-                      onPressed: () {
-                        setModalState(() {
-                          _selectedCategory = null;
-                          _selectedSubCategory = null;
-                        });
-                        setState(() {
-                          _selectedCategory = null;
-                          _selectedSubCategory = null;
-                        });
-                        Navigator.pop(context);
-                      },
-                      child: const Text("Clear"),
-                    )
+                  TextButton(
+                    onPressed: () {
+                      setModalState(() {
+                        _selectedCategory = null;
+                        _selectedSubCategory = null;
+                        _selectedType = null;
+                        _selectedAccountId = null;
+                      });
+                      setState(() {
+                        _selectedCategory = null;
+                        _selectedSubCategory = null;
+                        _selectedType = null;
+                        _selectedAccountId = null;
+                      });
+                      Navigator.pop(context);
+                    },
+                    child: const Text("Clear All"),
+                  )
                 ],
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<TransactionType>(
+                value: _selectedType,
+                decoration: InputDecoration(
+                  labelText: "Type",
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text("All Types")),
+                  ...TransactionType.values.map((t) => DropdownMenuItem(
+                      value: t,
+                      child: Text(
+                          t.name[0].toUpperCase() + t.name.substring(1)))),
+                ],
+                onChanged: (val) {
+                  setModalState(() => _selectedType = val);
+                  setState(() => _selectedType = val);
+                },
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<int>(
+                value: _selectedAccountId,
+                decoration: InputDecoration(
+                  labelText: "Account",
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+                items: [
+                  const DropdownMenuItem(
+                      value: null, child: Text("All Accounts")),
+                  ...widget.accounts.map((a) =>
+                      DropdownMenuItem(value: a.id, child: Text(a.name))),
+                ],
+                onChanged: (val) {
+                  setModalState(() => _selectedAccountId = val);
+                  setState(() => _selectedAccountId = val);
+                },
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
@@ -1067,7 +1316,6 @@ class _TransactionsTabState extends State<TransactionsTab> {
                     _selectedSubCategory = null;
                   });
                   setState(() {
-                    // Update main state
                     _selectedCategory = val;
                     _selectedSubCategory = null;
                   });
@@ -1123,9 +1371,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Filter Transactions
     final filtered = widget.transactions.where((t) {
-      // Date Range Filter
       if (_selectedDateRange != null) {
         final start = DateTime(_selectedDateRange!.start.year,
             _selectedDateRange!.start.month, _selectedDateRange!.start.day);
@@ -1141,7 +1387,16 @@ class _TransactionsTabState extends State<TransactionsTab> {
         }
       }
 
-      // Search Filter
+      if (_selectedType != null && t.type != _selectedType) {
+        return false;
+      }
+
+      if (_selectedAccountId != null) {
+        bool matches = t.sourceAccountId == _selectedAccountId ||
+            t.targetAccountId == _selectedAccountId;
+        if (!matches) return false;
+      }
+
       if (_searchCtrl.text.isNotEmpty) {
         final query = _searchCtrl.text.toLowerCase();
         final noteMatch = t.note?.toLowerCase().contains(query) ?? false;
@@ -1150,10 +1405,8 @@ class _TransactionsTabState extends State<TransactionsTab> {
         if (!noteMatch && !catMatch && !subMatch) return false;
       }
 
-      // Category Filter
       if (_selectedCategory == null) return true;
 
-      // Handle Splits: If any split matches the filter, show the transaction
       if (t.splits != null && t.splits!.isNotEmpty) {
         return t.splits!.any((s) =>
         s.category == _selectedCategory &&
@@ -1161,7 +1414,6 @@ class _TransactionsTabState extends State<TransactionsTab> {
                 s.subCategory == _selectedSubCategory));
       }
 
-      // Handle Standard Categories
       if (t.category == _selectedCategory) {
         if (_selectedSubCategory == null) return true;
         return t.subCategory == _selectedSubCategory;
@@ -1170,7 +1422,6 @@ class _TransactionsTabState extends State<TransactionsTab> {
       return false;
     }).toList();
 
-    // 2. Sort Descending
     filtered.sort((a, b) => b.date.compareTo(a.date));
 
     return Scaffold(
@@ -1205,12 +1456,16 @@ class _TransactionsTabState extends State<TransactionsTab> {
             children: [
               IconButton(
                 icon: const Icon(Icons.filter_list),
-                color: _selectedCategory != null
+                color: (_selectedCategory != null ||
+                    _selectedType != null ||
+                    _selectedAccountId != null)
                     ? const Color(0xFF2563EB)
                     : Colors.blueGrey.shade700,
                 onPressed: _showFilterSheet,
               ),
-              if (_selectedCategory != null)
+              if (_selectedCategory != null ||
+                  _selectedType != null ||
+                  _selectedAccountId != null)
                 Positioned(
                   right: 8,
                   top: 8,
@@ -1229,7 +1484,6 @@ class _TransactionsTabState extends State<TransactionsTab> {
       ),
       body: Column(
         children: [
-          // Date Control Bar
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
@@ -1280,37 +1534,89 @@ class _TransactionsTabState extends State<TransactionsTab> {
               ],
             ),
           ),
-
-          // Active Filter Indicator
-          if (_selectedCategory != null)
+          if (_selectedCategory != null ||
+              _selectedType != null ||
+              _selectedAccountId != null)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               color: Colors.blue.shade50,
-              child: Row(
-                children: [
-                  Icon(Icons.filter_alt, size: 14, color: Colors.blue.shade700),
-                  const SizedBox(width: 8),
-                  Text(
-                      "$_selectedCategory ${_selectedSubCategory != null ? '> $_selectedSubCategory' : ''}",
-                      style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.blue.shade800)),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: () => setState(() {
-                      _selectedCategory = null;
-                      _selectedSubCategory = null;
-                    }),
-                    child: Icon(Icons.close,
-                        size: 16, color: Colors.blue.shade800),
-                  )
-                ],
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    Icon(Icons.filter_alt,
+                        size: 14, color: Colors.blue.shade700),
+                    const SizedBox(width: 8),
+                    if (_selectedType != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Chip(
+                          label: Text(
+                              _selectedType!.name[0].toUpperCase() +
+                                  _selectedType!.name.substring(1),
+                              style: const TextStyle(fontSize: 10)),
+                          deleteIcon: const Icon(Icons.close, size: 12),
+                          onDeleted: () =>
+                              setState(() => _selectedType = null),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                        ),
+                      ),
+                    if (_selectedAccountId != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Chip(
+                          label: Text(
+                              widget.accounts
+                                  .firstWhere(
+                                      (a) => a.id == _selectedAccountId,
+                                  orElse: () => Account(
+                                      id: -1,
+                                      name: 'Unknown',
+                                      balance: 0,
+                                      type: AccountType.cash,
+                                      createdDate: DateTime.now()))
+                                  .name,
+                              style: const TextStyle(fontSize: 10)),
+                          deleteIcon: const Icon(Icons.close, size: 12),
+                          onDeleted: () =>
+                              setState(() => _selectedAccountId = null),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                        ),
+                      ),
+                    if (_selectedCategory != null)
+                      Chip(
+                        label: Text(
+                            "$_selectedCategory ${_selectedSubCategory != null ? '> $_selectedSubCategory' : ''}",
+                            style: const TextStyle(fontSize: 10)),
+                        deleteIcon: const Icon(Icons.close, size: 12),
+                        onDeleted: () => setState(() {
+                          _selectedCategory = null;
+                          _selectedSubCategory = null;
+                        }),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                      ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        _selectedCategory = null;
+                        _selectedSubCategory = null;
+                        _selectedType = null;
+                        _selectedAccountId = null;
+                      }),
+                      child: Text("Clear All",
+                          style: GoogleFonts.inter(
+                              fontSize: 11,
+                              color: Colors.blue.shade800,
+                              fontWeight: FontWeight.bold)),
+                    )
+                  ],
+                ),
               ),
             ),
-
-          // Transaction List
           Expanded(
             child: filtered.isEmpty
                 ? Center(
@@ -1338,12 +1644,14 @@ class _TransactionsTabState extends State<TransactionsTab> {
   }
 }
 
-// --- 5. Accounts Tab ---
+// --- 5. Accounts Tab (UPDATED) ---
 
 class AccountsTab extends StatelessWidget {
   final List<Account> accounts;
+  final List<Transaction> transactions;
 
-  const AccountsTab({super.key, required this.accounts});
+  const AccountsTab(
+      {super.key, required this.accounts, required this.transactions});
 
   void _showAccountSheet(BuildContext context, {Account? account}) {
     showModalBottomSheet(
@@ -1351,6 +1659,105 @@ class AccountsTab extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => AddAccountSheet(existingAccount: account),
+    );
+  }
+
+  void _showAccountDetails(BuildContext context, Account account) {
+    // Filter transactions for this account
+    final accountTxns = transactions.where((t) {
+      return t.sourceAccountId == account.id || t.targetAccountId == account.id;
+    }).toList();
+
+    // Sort by date desc
+    accountTxns.sort((a, b) => b.date.compareTo(a.date));
+
+    double totalCredit = 0;
+    double totalDebit = 0;
+
+    for (var t in accountTxns) {
+      if (t.type == TransactionType.income) {
+        totalCredit += t.amount;
+      } else if (t.type == TransactionType.expense) {
+        totalDebit += t.amount;
+      } else if (t.type == TransactionType.transfer) {
+        if (t.sourceAccountId == account.id) {
+          totalDebit += (t.amount + t.fee);
+        } else if (t.targetAccountId == account.id) {
+          totalCredit += t.amount;
+        }
+      }
+    }
+
+    final double openingBalance = account.balance - (totalCredit - totalDebit);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        minChildSize: 0.5,
+        builder: (_, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+              Text(account.name,
+                  style: GoogleFonts.inter(
+                      fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _summaryColumn("Opening", openingBalance, Colors.grey),
+                    _summaryColumn("Credits", totalCredit, Colors.green),
+                    _summaryColumn("Debits", totalDebit, Colors.red),
+                    _summaryColumn("Current", account.balance, Colors.blue),
+                  ],
+                ),
+              ),
+              const Divider(height: 32),
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  itemCount: accountTxns.length,
+                  itemBuilder: (ctx, i) => TransactionItem(
+                      transaction: accountTxns[i], accounts: accounts),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _summaryColumn(String label, double amount, Color color) {
+    return Column(
+      children: [
+        Text(label,
+            style: GoogleFonts.inter(fontSize: 12, color: Colors.grey.shade600)),
+        const SizedBox(height: 4),
+        Text(
+          NumberFormat.compactCurrency(symbol: '₹').format(amount),
+          style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold, color: color, fontSize: 14),
+        ),
+      ],
     );
   }
 
@@ -1379,6 +1786,7 @@ class AccountsTab extends StatelessWidget {
         itemBuilder: (context, index) {
           final acc = accounts[index];
           return GestureDetector(
+            onTap: () => _showAccountDetails(context, acc), // Add tap
             onLongPress: () => _showAccountSheet(context, account: acc),
             child: Container(
               padding: const EdgeInsets.all(20),
@@ -2738,7 +3146,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   final TextEditingController _splitAmountCtrl = TextEditingController();
   String? _splitErrorText;
   String? _submitErrorText;
-  RecurrenceFrequency _recurrence = RecurrenceFrequency.none; // Recurring
+  RecurrenceFrequency _recurrence = RecurrenceFrequency.none;
 
   Map<String, List<String>> _expenseCategories = {};
   final List<String> _incomeCategories = [
@@ -2778,7 +3186,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       _selectedCategory = t.category;
       _selectedSubCategory = t.subCategory;
       _selectedDate = t.date;
-      _recurrence = t.recurrence; // Load recurring
+      _recurrence = t.recurrence;
       if (t.splits != null && t.splits!.isNotEmpty) {
         _isSplitMode = true;
         _currentSplits.addAll(t.splits!);
@@ -2867,7 +3275,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   void _save() {
     final user = AuthService.currentUser;
     if (user == null) return;
-    setState(() => _submitErrorText = null); // Reset error
+    setState(() => _submitErrorText = null);
 
     final double amount = double.tryParse(_amountCtrl.text) ?? 0;
     final double fee = double.tryParse(_feeCtrl.text) ?? 0;
@@ -2886,38 +3294,59 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
     final firestore = FirebaseFirestore.instance;
     final userDoc = firestore.collection('users').doc(user.uid);
+    final batch = firestore.batch();
 
-    // Revert old balance if editing
+    Map<int, double> tempBalances = {
+      for (var a in widget.accounts) a.id: a.balance
+    };
+
     if (widget.existingTransaction != null) {
       final oldTxn = widget.existingTransaction!;
-      final sIdx =
-      widget.accounts.indexWhere((a) => a.id == oldTxn.sourceAccountId);
-      if (sIdx != -1) {
-        double newBal = widget.accounts[sIdx].balance;
-        if (oldTxn.type == TransactionType.expense)
-          newBal += oldTxn.amount;
-        else if (oldTxn.type == TransactionType.transfer)
-          newBal += (oldTxn.amount + oldTxn.fee);
-        else if (oldTxn.type == TransactionType.income) newBal -= oldTxn.amount;
 
-        userDoc
-            .collection('accounts')
-            .doc(widget.accounts[sIdx].id.toString())
-            .update({'balance': EncryptionService.encryptDouble(newBal)});
-      }
-      if (oldTxn.type == TransactionType.transfer &&
-          oldTxn.targetAccountId != null) {
-        final tIdx =
-        widget.accounts.indexWhere((a) => a.id == oldTxn.targetAccountId);
-        if (tIdx != -1) {
-          double newBal = widget.accounts[tIdx].balance - oldTxn.amount;
-          userDoc
-              .collection('accounts')
-              .doc(widget.accounts[tIdx].id.toString())
-              .update({'balance': EncryptionService.encryptDouble(newBal)});
+      if (tempBalances.containsKey(oldTxn.sourceAccountId)) {
+        double current = tempBalances[oldTxn.sourceAccountId]!;
+        if (oldTxn.type == TransactionType.expense) {
+          current += oldTxn.amount;
+        } else if (oldTxn.type == TransactionType.transfer) {
+          current += (oldTxn.amount + oldTxn.fee);
+        } else if (oldTxn.type == TransactionType.income) {
+          current -= oldTxn.amount;
         }
+        tempBalances[oldTxn.sourceAccountId] = current;
+      }
+
+      if (oldTxn.type == TransactionType.transfer &&
+          oldTxn.targetAccountId != null &&
+          tempBalances.containsKey(oldTxn.targetAccountId)) {
+        double current = tempBalances[oldTxn.targetAccountId!]!;
+        current -= oldTxn.amount;
+        tempBalances[oldTxn.targetAccountId!] = current;
       }
     }
+
+    if (tempBalances.containsKey(_selectedSourceId)) {
+      double current = tempBalances[_selectedSourceId]!;
+      if (_selectedType == TransactionType.expense) {
+        current -= amount;
+      } else if (_selectedType == TransactionType.transfer) {
+        current -= (amount + fee);
+      } else if (_selectedType == TransactionType.income) {
+        current += amount;
+      }
+      tempBalances[_selectedSourceId] = current;
+    }
+
+    if (_selectedType == TransactionType.transfer &&
+        tempBalances.containsKey(_selectedTargetId)) {
+      double current = tempBalances[_selectedTargetId]!;
+      current += amount;
+      tempBalances[_selectedTargetId] = current;
+    }
+
+    tempBalances.forEach((id, newBalance) {
+      final accRef = userDoc.collection('accounts').doc(id.toString());
+      batch.update(accRef, {'balance': EncryptionService.encryptDouble(newBalance)});
+    });
 
     final newTxn = Transaction(
       id: widget.existingTransaction?.id ?? DateTime.now().toString(),
@@ -2938,45 +3367,13 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       date: _selectedDate,
       splits: _isSplitMode ? _currentSplits : null,
       note: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
-      recurrence: _recurrence, // Save recurrence
+      recurrence: _recurrence,
     );
 
-    // Update new balance logic.
-    // Fetch current balance from accounts snapshot passed in widget to ensure we encrypt the latest visible value +/- delta.
+    final txnRef = userDoc.collection('transactions').doc(newTxn.id);
+    batch.set(txnRef, newTxn.toMap());
 
-    // Note: Since we are encrypting, we can't use FieldValue.increment easily (server doesn't know how to decrypt).
-    // We must read-modify-write.
-    // Luckily we have the latest account state from the stream in `widget.accounts`.
-
-    Account sourceAcc =
-    widget.accounts.firstWhere((a) => a.id == newTxn.sourceAccountId);
-    double sourceBal = sourceAcc.balance;
-
-    if (newTxn.type == TransactionType.expense) {
-      sourceBal -= newTxn.amount;
-    } else if (newTxn.type == TransactionType.transfer) {
-      sourceBal -= (newTxn.amount + newTxn.fee);
-    } else if (newTxn.type == TransactionType.income) {
-      sourceBal += newTxn.amount;
-    }
-    userDoc
-        .collection('accounts')
-        .doc(sourceAcc.id.toString())
-        .update({'balance': EncryptionService.encryptDouble(sourceBal)});
-
-    if (newTxn.type == TransactionType.transfer &&
-        newTxn.targetAccountId != null) {
-      Account targetAcc =
-      widget.accounts.firstWhere((a) => a.id == newTxn.targetAccountId);
-      double targetBal = targetAcc.balance + newTxn.amount;
-      userDoc
-          .collection('accounts')
-          .doc(targetAcc.id.toString())
-          .update({'balance': EncryptionService.encryptDouble(targetBal)});
-    }
-
-    userDoc.collection('transactions').doc(newTxn.id).set(newTxn.toMap());
-
+    batch.commit();
     Navigator.pop(context);
   }
 
