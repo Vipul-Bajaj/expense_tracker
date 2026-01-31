@@ -219,9 +219,7 @@ class Transaction {
           .map((s) => TransactionSplit.fromMap(s))
           .toList()
           : null,
-      note: map['note'] != null
-          ? EncryptionService.decrypt(map['note'])
-          : null,
+      note: map['note'] != null ? EncryptionService.decrypt(map['note']) : null,
     );
   }
 }
@@ -435,7 +433,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 ),
                 const SizedBox(height: 40),
               ],
-
               if (user != null) ...[
                 Container(
                   padding: const EdgeInsets.all(4),
@@ -538,7 +535,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 Text(
                   'Track expenses, income, manage accounts, and analyze your financial health with detailed reports.',
                   style: GoogleFonts.inter(
-                      fontSize: 16, color: Colors.blueGrey.shade500, height: 1.5),
+                      fontSize: 16,
+                      color: Colors.blueGrey.shade500,
+                      height: 1.5),
                   textAlign: TextAlign.center,
                 ),
                 const Spacer(),
@@ -670,6 +669,10 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
 
                 final List<Widget> pages = [
                   DashboardTab(accounts: accounts, transactions: transactions),
+                  TransactionsTab(
+                      transactions: transactions,
+                      accounts: accounts,
+                      categories: categories),
                   AccountsTab(accounts: accounts),
                   ReportsTab(accounts: accounts, transactions: transactions),
                   CategoriesTab(categories: categories),
@@ -689,6 +692,10 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                           icon: Icon(Icons.dashboard_outlined),
                           activeIcon: Icon(Icons.dashboard),
                           label: 'Dashboard'),
+                      BottomNavigationBarItem(
+                          icon: Icon(Icons.history_outlined),
+                          activeIcon: Icon(Icons.history),
+                          label: 'History'),
                       BottomNavigationBarItem(
                           icon: Icon(Icons.account_balance_wallet_outlined),
                           activeIcon: Icon(Icons.account_balance_wallet),
@@ -937,6 +944,370 @@ class _DashboardTabState extends State<DashboardTab> {
             ...monthlyTransactions.take(10).map((txn) =>
                 TransactionItem(transaction: txn, accounts: widget.accounts)),
           const SizedBox(height: 80),
+        ],
+      ),
+    );
+  }
+}
+
+// --- 4.5. Transactions Tab (NEW) ---
+
+class TransactionsTab extends StatefulWidget {
+  final List<Transaction> transactions;
+  final List<Account> accounts;
+  final Map<String, List<String>> categories;
+
+  const TransactionsTab({
+    super.key,
+    required this.transactions,
+    required this.accounts,
+    required this.categories,
+  });
+
+  @override
+  State<TransactionsTab> createState() => _TransactionsTabState();
+}
+
+class _TransactionsTabState extends State<TransactionsTab> {
+  DateTime _selectedDate = DateTime.now();
+  bool _filterBySpecificDate =
+  false; // false = Month View, true = Specific Day View
+  String? _selectedCategory;
+  String? _selectedSubCategory;
+
+  void _changeDate(int offset) {
+    setState(() {
+      if (_filterBySpecificDate) {
+        _selectedDate = _selectedDate.add(Duration(days: offset));
+      } else {
+        _selectedDate =
+            DateTime(_selectedDate.year, _selectedDate.month + offset);
+      }
+    });
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      setState(() {
+        _selectedDate = picked;
+        _filterBySpecificDate = true;
+      });
+    }
+  }
+
+  void _showFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(builder: (context, setModalState) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("Filter Transactions",
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold, fontSize: 18)),
+                  if (_selectedCategory != null)
+                    TextButton(
+                      onPressed: () {
+                        setModalState(() {
+                          _selectedCategory = null;
+                          _selectedSubCategory = null;
+                        });
+                        setState(() {
+                          _selectedCategory = null;
+                          _selectedSubCategory = null;
+                        });
+                        Navigator.pop(context);
+                      },
+                      child: const Text("Clear"),
+                    )
+                ],
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: _selectedCategory,
+                decoration: InputDecoration(
+                  labelText: "Category",
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+                isExpanded: true,
+                items: [
+                  const DropdownMenuItem(
+                      value: null, child: Text("All Categories")),
+                  ...widget.categories.keys
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c))),
+                ],
+                onChanged: (val) {
+                  setModalState(() {
+                    _selectedCategory = val;
+                    _selectedSubCategory = null;
+                  });
+                  setState(() {
+                    // Update main state
+                    _selectedCategory = val;
+                    _selectedSubCategory = null;
+                  });
+                },
+              ),
+              if (_selectedCategory != null &&
+                  widget.categories[_selectedCategory] != null) ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: _selectedSubCategory,
+                  decoration: InputDecoration(
+                    labelText: "Sub-Category",
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                  ),
+                  isExpanded: true,
+                  items: [
+                    const DropdownMenuItem(
+                        value: null, child: Text("All Sub-Categories")),
+                    ...widget.categories[_selectedCategory]!
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s))),
+                  ],
+                  onChanged: (val) {
+                    setModalState(() => _selectedSubCategory = val);
+                    setState(() => _selectedSubCategory = val);
+                  },
+                ),
+              ],
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text("Apply Filters",
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold, color: Colors.white)),
+                ),
+              )
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 1. Filter Transactions
+    final filtered = widget.transactions.where((t) {
+      // Date Filter
+      bool dateMatch;
+      if (_filterBySpecificDate) {
+        dateMatch = t.date.year == _selectedDate.year &&
+            t.date.month == _selectedDate.month &&
+            t.date.day == _selectedDate.day;
+      } else {
+        dateMatch = t.date.year == _selectedDate.year &&
+            t.date.month == _selectedDate.month;
+      }
+      if (!dateMatch) return false;
+
+      // Category Filter
+      if (_selectedCategory == null) return true;
+
+      // Handle Splits: If any split matches the filter, show the transaction
+      if (t.splits != null && t.splits!.isNotEmpty) {
+        return t.splits!.any((s) =>
+        s.category == _selectedCategory &&
+            (_selectedSubCategory == null ||
+                s.subCategory == _selectedSubCategory));
+      }
+
+      // Handle Standard Categories
+      if (t.category == _selectedCategory) {
+        if (_selectedSubCategory == null) return true;
+        return t.subCategory == _selectedSubCategory;
+      }
+
+      return false;
+    }).toList();
+
+    // 2. Sort Descending
+    filtered.sort((a, b) => b.date.compareTo(a.date));
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: Text("Transactions",
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.bold, color: Colors.blueGrey.shade800)),
+        actions: [
+          Stack(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.filter_list),
+                color: _selectedCategory != null
+                    ? const Color(0xFF2563EB)
+                    : Colors.blueGrey.shade700,
+                onPressed: _showFilterSheet,
+              ),
+              if (_selectedCategory != null)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                )
+            ],
+          )
+        ],
+      ),
+      body: Column(
+        children: [
+          // Date Control Bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border:
+              Border(bottom: BorderSide(color: Colors.blueGrey.shade50)),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: () => _changeDate(-1),
+                ),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _pickDate,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.calendar_today,
+                              size: 14, color: Colors.blueGrey),
+                          const SizedBox(width: 8),
+                          Text(
+                            _filterBySpecificDate
+                                ? DateFormat('dd MMM yyyy')
+                                .format(_selectedDate)
+                                : DateFormat('MMMM yyyy').format(_selectedDate),
+                            style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                                color: Colors.blueGrey.shade800),
+                          ),
+                          if (_filterBySpecificDate) ...[
+                            const SizedBox(width: 8),
+                            Text("(Day View)",
+                                style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    color: Colors.blue.shade600,
+                                    fontWeight: FontWeight.bold))
+                          ]
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                if (_filterBySpecificDate)
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: "Switch to Month View",
+                    onPressed: () =>
+                        setState(() => _filterBySpecificDate = false),
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: () => _changeDate(1),
+                  ),
+              ],
+            ),
+          ),
+
+          // Active Filter Indicator
+          if (_selectedCategory != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              color: Colors.blue.shade50,
+              child: Row(
+                children: [
+                  Icon(Icons.filter_alt, size: 14, color: Colors.blue.shade700),
+                  const SizedBox(width: 8),
+                  Text(
+                      "$_selectedCategory ${_selectedSubCategory != null ? '> $_selectedSubCategory' : ''}",
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blue.shade800)),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => setState(() {
+                      _selectedCategory = null;
+                      _selectedSubCategory = null;
+                    }),
+                    child: Icon(Icons.close,
+                        size: 16, color: Colors.blue.shade800),
+                  )
+                ],
+              ),
+            ),
+
+          // Transaction List
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.search_off,
+                        size: 48, color: Colors.blueGrey.shade200),
+                    const SizedBox(height: 16),
+                    Text("No transactions found",
+                        style: GoogleFonts.inter(
+                            color: Colors.blueGrey.shade400)),
+                  ],
+                ))
+                : ListView.builder(
+              padding: const EdgeInsets.all(20),
+              itemCount: filtered.length,
+              itemBuilder: (ctx, i) => TransactionItem(
+                  transaction: filtered[i], accounts: widget.accounts),
+            ),
+          ),
         ],
       ),
     );
@@ -1778,7 +2149,8 @@ class TransactionItem extends StatelessWidget {
 
     final txn = transaction;
 
-    final sourceAccount = accounts.firstWhere((a) => a.id == txn.sourceAccountId,
+    final sourceAccount = accounts.firstWhere(
+            (a) => a.id == txn.sourceAccountId,
         orElse: () => Account(
             id: -1,
             name: 'Unknown',
@@ -2373,7 +2745,8 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             'Shopping': ['Clothes', 'Electronics', 'Home', 'Gifts'],
           };
           _selectedCategory = _expenseCategories.keys.first;
-          _selectedSubCategory = _expenseCategories[_selectedCategory]?.firstOrNull;
+          _selectedSubCategory =
+              _expenseCategories[_selectedCategory]?.firstOrNull;
         });
       }
     }
@@ -2443,26 +2816,31 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     // Revert old balance if editing
     if (widget.existingTransaction != null) {
       final oldTxn = widget.existingTransaction!;
-      final sIdx = widget.accounts
-          .indexWhere((a) => a.id == oldTxn.sourceAccountId);
+      final sIdx =
+      widget.accounts.indexWhere((a) => a.id == oldTxn.sourceAccountId);
       if (sIdx != -1) {
         double newBal = widget.accounts[sIdx].balance;
         if (oldTxn.type == TransactionType.expense)
           newBal += oldTxn.amount;
         else if (oldTxn.type == TransactionType.transfer)
           newBal += (oldTxn.amount + oldTxn.fee);
-        else if (oldTxn.type == TransactionType.income)
-          newBal -= oldTxn.amount;
+        else if (oldTxn.type == TransactionType.income) newBal -= oldTxn.amount;
 
-        userDoc.collection('accounts').doc(widget.accounts[sIdx].id.toString()).update({'balance': EncryptionService.encryptDouble(newBal)});
+        userDoc
+            .collection('accounts')
+            .doc(widget.accounts[sIdx].id.toString())
+            .update({'balance': EncryptionService.encryptDouble(newBal)});
       }
       if (oldTxn.type == TransactionType.transfer &&
           oldTxn.targetAccountId != null) {
-        final tIdx = widget.accounts
-            .indexWhere((a) => a.id == oldTxn.targetAccountId);
+        final tIdx =
+        widget.accounts.indexWhere((a) => a.id == oldTxn.targetAccountId);
         if (tIdx != -1) {
           double newBal = widget.accounts[tIdx].balance - oldTxn.amount;
-          userDoc.collection('accounts').doc(widget.accounts[tIdx].id.toString()).update({'balance': EncryptionService.encryptDouble(newBal)});
+          userDoc
+              .collection('accounts')
+              .doc(widget.accounts[tIdx].id.toString())
+              .update({'balance': EncryptionService.encryptDouble(newBal)});
         }
       }
     }
@@ -2495,7 +2873,8 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     // We must read-modify-write.
     // Luckily we have the latest account state from the stream in `widget.accounts`.
 
-    Account sourceAcc = widget.accounts.firstWhere((a) => a.id == newTxn.sourceAccountId);
+    Account sourceAcc =
+    widget.accounts.firstWhere((a) => a.id == newTxn.sourceAccountId);
     double sourceBal = sourceAcc.balance;
 
     if (newTxn.type == TransactionType.expense) {
@@ -2505,13 +2884,20 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     } else if (newTxn.type == TransactionType.income) {
       sourceBal += newTxn.amount;
     }
-    userDoc.collection('accounts').doc(sourceAcc.id.toString()).update({'balance': EncryptionService.encryptDouble(sourceBal)});
+    userDoc
+        .collection('accounts')
+        .doc(sourceAcc.id.toString())
+        .update({'balance': EncryptionService.encryptDouble(sourceBal)});
 
-
-    if (newTxn.type == TransactionType.transfer && newTxn.targetAccountId != null) {
-      Account targetAcc = widget.accounts.firstWhere((a) => a.id == newTxn.targetAccountId);
+    if (newTxn.type == TransactionType.transfer &&
+        newTxn.targetAccountId != null) {
+      Account targetAcc =
+      widget.accounts.firstWhere((a) => a.id == newTxn.targetAccountId);
       double targetBal = targetAcc.balance + newTxn.amount;
-      userDoc.collection('accounts').doc(targetAcc.id.toString()).update({'balance': EncryptionService.encryptDouble(targetBal)});
+      userDoc
+          .collection('accounts')
+          .doc(targetAcc.id.toString())
+          .update({'balance': EncryptionService.encryptDouble(targetBal)});
     }
 
     userDoc.collection('transactions').doc(newTxn.id).set(newTxn.toMap());
