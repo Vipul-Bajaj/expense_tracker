@@ -3671,7 +3671,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
               Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: _incomeCategories
+                  children: _incomeCategories // Already sorted in initState
                       .map((c) => ChoiceChip(
                       label: Text(c),
                       selected: _selectedCategory == c,
@@ -3823,7 +3823,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                   Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: sortedSubCategories
+                      children: sortedSubCategories // Use sorted list
                           .map((sub) => ChoiceChip(
                           label: Text(sub),
                           selected: _selectedSubCategory == sub,
