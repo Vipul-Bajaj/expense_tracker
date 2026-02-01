@@ -331,6 +331,31 @@ class WelcomeScreen extends StatefulWidget {
 class _WelcomeScreenState extends State<WelcomeScreen> {
   bool _isLoading = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // Automatically check for logged in user on start
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAutoLogin();
+    });
+  }
+
+  Future<void> _checkAutoLogin() async {
+    final user = AuthService.currentUser;
+    if (user != null) {
+      // User is already logged in. Show branding for a moment then redirect.
+      // 1.5 seconds delay for a smooth welcome experience
+      await Future.delayed(const Duration(milliseconds: 1500));
+      if (!mounted) return;
+
+      setState(() => _isLoading = true);
+      await _migrateLocalData(user.uid);
+      setState(() => _isLoading = false);
+
+      if (mounted) _navigateToDashboard();
+    }
+  }
+
   void _navigateToDashboard() {
     Navigator.pushReplacement(
         context, MaterialPageRoute(builder: (_) => const MainAppScaffold()));
@@ -414,126 +439,34 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     }
   }
 
-  Future<void> _handleSignOut() async {
-    await AuthService.signOut();
-    setState(() {});
-  }
-
   @override
   Widget build(BuildContext context) {
+    // Only show "Sign in" buttons if NO user is detected (and we aren't loading/redirecting)
+    // If a user exists, we are in the "splash" phase waiting to redirect.
     final user = AuthService.currentUser;
+    final bool showLoginOptions = user == null && !_isLoading;
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Spacer(),
-              if (user == null) ...[
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Spacer(),
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                       color: Colors.blue.shade50, shape: BoxShape.circle),
-                  child:
-                  Icon(Icons.wallet, size: 64, color: Colors.blue.shade600),
+                  child: Icon(Icons.wallet, size: 64, color: Colors.blue.shade600),
                 ),
                 const SizedBox(height: 40),
-              ],
-              if (user != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.blue.shade100, width: 2),
-                  ),
-                  child: CircleAvatar(
-                    radius: 48,
-                    backgroundImage: user.photoURL != null
-                        ? NetworkImage(user.photoURL!)
-                        : null,
-                    backgroundColor: Colors.blue.shade50,
-                    child: user.photoURL == null
-                        ? Text(user.displayName?[0] ?? 'U',
-                        style: GoogleFonts.inter(
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue.shade700))
-                        : null,
-                  ),
-                ),
-                const SizedBox(height: 24),
+
                 Text(
-                  'Welcome back,',
-                  style: GoogleFonts.inter(
-                      fontSize: 18, color: Colors.blueGrey.shade500),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  user.displayName ?? 'User',
-                  style: GoogleFonts.inter(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey.shade900),
-                  textAlign: TextAlign.center,
-                ),
-                if (user.email != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      user.email!,
-                      style: GoogleFonts.inter(
-                          fontSize: 14, color: Colors.blueGrey.shade400),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                const Spacer(),
-                if (_isLoading)
-                  const CircularProgressIndicator()
-                else ...[
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed: _navigateToDashboard,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2563EB),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                        elevation: 0,
-                      ),
-                      child: Text('Continue',
-                          style: GoogleFonts.inter(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: OutlinedButton(
-                      onPressed: _handleSignOut,
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: Colors.grey.shade300),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                      ),
-                      child: Text("Sign Out / Switch Account",
-                          style: GoogleFonts.inter(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.blueGrey.shade700)),
-                    ),
-                  ),
-                ]
-              ] else ...[
-                Text(
-                  'Control Your Money',
+                  'Expense Tracker',
                   style: GoogleFonts.inter(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
@@ -541,41 +474,67 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
-                Text(
-                  'Track expenses, income, manage accounts, and analyze your financial health with detailed reports.',
-                  style: GoogleFonts.inter(
-                      fontSize: 16,
-                      color: Colors.blueGrey.shade500,
-                      height: 1.5),
-                  textAlign: TextAlign.center,
-                ),
-                const Spacer(),
-                if (_isLoading)
-                  const CircularProgressIndicator()
-                else ...[
-                  // Guest button removed
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: OutlinedButton.icon(
-                      onPressed: _handleGoogleSignIn,
-                      icon: const Icon(Icons.login),
-                      label: Text('Sign in with Google',
-                          style: GoogleFonts.inter(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blueGrey.shade700)),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: Colors.blueGrey.shade200),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                      ),
+
+                if (showLoginOptions)
+                  Text(
+                    'Control Your Money',
+                    style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blueGrey.shade700),
+                    textAlign: TextAlign.center,
+                  ),
+
+                if (!showLoginOptions) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Loading your finances...',
+                    style: GoogleFonts.inter(
+                        fontSize: 16,
+                        color: Colors.blueGrey.shade400
                     ),
                   ),
+                  const SizedBox(height: 32),
+                  const CircularProgressIndicator(),
+                ],
+
+                const Spacer(),
+
+                if (showLoginOptions) ...[
+                  Text(
+                    'Track expenses, income, manage accounts, and analyze your financial health.',
+                    style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: Colors.blueGrey.shade500,
+                        height: 1.5),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 40),
+                  if (_isLoading)
+                    const CircularProgressIndicator()
+                  else
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: OutlinedButton.icon(
+                        onPressed: _handleGoogleSignIn,
+                        icon: const Icon(Icons.login),
+                        label: Text('Sign in with Google',
+                            style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blueGrey.shade700)),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.blueGrey.shade200),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16)),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 40),
                 ],
               ],
-              const SizedBox(height: 40),
-            ],
+            ),
           ),
         ),
       ),
@@ -598,6 +557,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
 
   void _checkRecurringTransactions(
       List<Transaction> transactions, List<Account> accounts, String userId) async {
+    // ... existing recurring logic ...
     if (_recurrenceChecked) return;
     _recurrenceChecked = true;
 
@@ -738,7 +698,15 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
   @override
   Widget build(BuildContext context) {
     final user = AuthService.currentUser;
-    if (user == null) return const WelcomeScreen();
+    // If auth state changes to null, redirect to Welcome
+    if (user == null) {
+      Future.microtask(() {
+        Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+                (route) => false);
+      });
+      return const SizedBox();
+    }
 
     final userDocRef =
     FirebaseFirestore.instance.collection('users').doc(user.uid);
@@ -937,52 +905,120 @@ class _DashboardTabState extends State<DashboardTab> {
     }
   }
 
+  void _switchAccount(BuildContext context) async {
+    // 1. Sign out the current user
+    await AuthService.signOut();
+
+    // 2. Navigate back to Welcome Screen
+    // The welcome screen will see user is null, and show "Sign In" button.
+    // The user can then click "Sign in with Google" which will open the account picker
+    // (because signOut() calls googleSignIn.signOut()).
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+            (route) => false,
+      );
+    }
+  }
+
   void _showProfileOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
         return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
           padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 24),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
               if (_user != null) ...[
                 CircleAvatar(
-                  radius: 32,
+                  radius: 36,
+                  backgroundColor: Colors.blue.shade50,
                   backgroundImage: _user!.photoURL != null
                       ? NetworkImage(_user!.photoURL!)
                       : null,
                   child: _user!.photoURL == null
                       ? Text(_user!.displayName?[0] ?? "U",
-                      style: const TextStyle(fontSize: 24))
+                      style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blue.shade700))
                       : null,
                 ),
                 const SizedBox(height: 16),
                 Text(
                   _user!.displayName ?? 'User',
                   style: GoogleFonts.inter(
-                      fontSize: 18, fontWeight: FontWeight.bold),
+                      fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueGrey.shade900),
                 ),
                 Text(
                   _user!.email ?? '',
-                  style: GoogleFonts.inter(color: Colors.grey),
+                  style: GoogleFonts.inter(color: Colors.blueGrey.shade500, fontSize: 14),
                 ),
                 const SizedBox(height: 24),
-                const Divider(),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
               ],
+
+              // Enhanced Switch Account Option
               ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8)
+                  ),
+                  child: const Icon(Icons.switch_account_outlined, color: Color(0xFF2563EB)),
+                ),
+                title: Text('Switch Account',
+                    style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blueGrey.shade800)),
+                subtitle: Text('Sign in with a different Google account',
+                    style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _switchAccount(context);
+                },
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+
+              const SizedBox(height: 8),
+
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(8)
+                  ),
+                  child: Icon(Icons.logout, color: Colors.red.shade600),
+                ),
                 title: Text('Sign Out',
                     style: GoogleFonts.inter(
-                        color: Colors.red, fontWeight: FontWeight.w600)),
+                        fontSize: 16,
+                        color: Colors.red.shade700, fontWeight: FontWeight.w600)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _signOut(context);
                 },
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
+              const SizedBox(height: 16),
             ],
           ),
         );
@@ -1021,18 +1057,24 @@ class _DashboardTabState extends State<DashboardTab> {
           if (_user != null) ...[
             GestureDetector(
               onTap: () => _showProfileOptions(context),
-              child: CircleAvatar(
-                radius: 16,
-                backgroundColor: Colors.blue.shade100,
-                backgroundImage: _user!.photoURL != null
-                    ? NetworkImage(_user!.photoURL!)
-                    : null,
-                child: _user!.photoURL == null
-                    ? Icon(Icons.person, size: 20, color: Colors.blue.shade700)
-                    : null,
+              child: Container(
+                margin: const EdgeInsets.only(right: 16),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.blue.shade100, width: 2),
+                ),
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.blue.shade50,
+                  backgroundImage: _user!.photoURL != null
+                      ? NetworkImage(_user!.photoURL!)
+                      : null,
+                  child: _user!.photoURL == null
+                      ? Icon(Icons.person, size: 20, color: Colors.blue.shade700)
+                      : null,
+                ),
               ),
             ),
-            const SizedBox(width: 16),
           ] else ...[
             TextButton(
               onPressed: () => _signOut(context),
