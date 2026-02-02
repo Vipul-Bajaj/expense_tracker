@@ -61,6 +61,69 @@ class EncryptionService {
   }
 }
 
+class FinanceCalculator {
+  static double calculateIncome(List<Transaction> transactions) {
+    return transactions.fold(0.0, (sum, t) {
+      if (t.type == TransactionType.income) return sum + t.amount;
+      return sum;
+    });
+  }
+
+  static double calculateExpense(List<Transaction> transactions) {
+    return transactions.fold(0.0, (sum, t) {
+      if (t.type == TransactionType.expense) return sum + t.amount;
+      if (t.type == TransactionType.transfer) return sum + t.fee;
+      return sum;
+    });
+  }
+
+  static Map<String, double> calculateBreakdown({
+    required List<Transaction> transactions,
+    required List<Account> accounts,
+    required bool byCategory,
+  }) {
+    final Map<String, double> breakdown = {};
+    for (var t in transactions) {
+      if (byCategory) {
+        if (t.type == TransactionType.expense) {
+          if (t.splits != null && t.splits!.isNotEmpty) {
+            for (var split in t.splits!) {
+              String key = split.subCategory != null && split.subCategory!.isNotEmpty
+                  ? "${split.category} - ${split.subCategory}"
+                  : split.category;
+              breakdown[key] = (breakdown[key] ?? 0) + split.amount;
+            }
+          } else {
+            String key = t.subCategory != null && t.subCategory!.isNotEmpty
+                ? "${t.category} - ${t.subCategory}"
+                : t.category;
+            breakdown[key] = (breakdown[key] ?? 0) + t.amount;
+          }
+        } else if (t.type == TransactionType.transfer && t.fee > 0) {
+          breakdown['Transfer Fees'] = (breakdown['Transfer Fees'] ?? 0) + t.fee;
+        }
+      } else {
+        if (t.type == TransactionType.expense ||
+            (t.type == TransactionType.transfer && t.fee > 0)) {
+          final account = accounts.firstWhere((a) => a.id == t.sourceAccountId,
+              orElse: () => Account(
+                  id: -1,
+                  name: 'Unknown',
+                  balance: 0,
+                  type: AccountType.cash,
+                  createdDate: DateTime.now()));
+
+          String key = account.type.name[0].toUpperCase() + account.type.name.substring(1);
+
+          double amountToAdd = t.type == TransactionType.expense ? t.amount : t.fee;
+          breakdown[key] = (breakdown[key] ?? 0) + amountToAdd;
+        }
+      }
+    }
+    return breakdown;
+  }
+}
+
 // --- 1. Data Models & Adapters ---
 
 enum AccountType { bank, wallet, credit, cash }
@@ -1034,16 +1097,8 @@ class _DashboardTabState extends State<DashboardTab> {
     }).toList();
     monthlyTransactions.sort((a, b) => b.date.compareTo(a.date));
 
-    final double monthlyIncome = monthlyTransactions.fold(0.0, (sum, t) {
-      if (t.type == TransactionType.income) return sum + t.amount;
-      return sum;
-    });
-
-    final double monthlyExpense = monthlyTransactions.fold(0.0, (sum, t) {
-      if (t.type == TransactionType.expense) return sum + t.amount;
-      if (t.type == TransactionType.transfer) return sum + t.fee;
-      return sum;
-    });
+    final double monthlyIncome = FinanceCalculator.calculateIncome(monthlyTransactions);
+    final double monthlyExpense = FinanceCalculator.calculateExpense(monthlyTransactions);
 
     final double monthlyTotal = monthlyIncome - monthlyExpense;
 
@@ -2042,55 +2097,13 @@ class _ReportsTabState extends State<ReportsTab> {
           t.date.month == _currentMonth.month;
     }).toList();
 
-    final double monthlyExpense = monthlyTransactions.fold(0.0, (sum, t) {
-      if (t.type == TransactionType.expense) return sum + t.amount;
-      if (t.type == TransactionType.transfer) return sum + t.fee;
-      return sum;
-    });
+    final double monthlyExpense = FinanceCalculator.calculateExpense(monthlyTransactions);
 
-    final Map<String, double> breakdown = {};
-    for (var t in monthlyTransactions) {
-      if (_reportType == ReportType.category) {
-        if (t.type == TransactionType.expense) {
-          if (t.splits != null && t.splits!.isNotEmpty) {
-            for (var split in t.splits!) {
-              String key =
-              split.subCategory != null && split.subCategory!.isNotEmpty
-                  ? "${split.category} - ${split.subCategory}"
-                  : split.category;
-              breakdown[key] = (breakdown[key] ?? 0) + split.amount;
-            }
-          } else {
-            String key = t.subCategory != null && t.subCategory!.isNotEmpty
-                ? "${t.category} - ${t.subCategory}"
-                : t.category;
-            breakdown[key] = (breakdown[key] ?? 0) + t.amount;
-          }
-        } else if (t.type == TransactionType.transfer && t.fee > 0) {
-          breakdown['Transfer Fees'] =
-              (breakdown['Transfer Fees'] ?? 0) + t.fee;
-        }
-      } else {
-        if (t.type == TransactionType.expense ||
-            (t.type == TransactionType.transfer && t.fee > 0)) {
-          final account = widget.accounts.firstWhere(
-                  (a) => a.id == t.sourceAccountId,
-              orElse: () => Account(
-                  id: -1,
-                  name: 'Unknown',
-                  balance: 0,
-                  type: AccountType.cash,
-                  createdDate: DateTime.now()));
-
-          String key = account.type.name[0].toUpperCase() +
-              account.type.name.substring(1);
-
-          double amountToAdd =
-          t.type == TransactionType.expense ? t.amount : t.fee;
-          breakdown[key] = (breakdown[key] ?? 0) + amountToAdd;
-        }
-      }
-    }
+    final Map<String, double> breakdown = FinanceCalculator.calculateBreakdown(
+      transactions: monthlyTransactions,
+      accounts: widget.accounts,
+      byCategory: _reportType == ReportType.category,
+    );
     final sortedBreakdown = Map.fromEntries(
         breakdown.entries.toList()..sort((a, b) => b.value.compareTo(a.value)));
 

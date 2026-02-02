@@ -262,4 +262,94 @@ void main() {
       expect(generatedTxns.length, 0);
     });
   });
+
+ 
+  group('FinanceCalculator Tests', () {
+    test('calculateIncome sums only income transactions', () {
+      final txns = [
+        Transaction(
+            id: '1', amount: 100, type: TransactionType.income, sourceAccountId: 1, category: 'Salary', date: DateTime.now()),
+        Transaction(
+            id: '2', amount: 50, type: TransactionType.expense, sourceAccountId: 1, category: 'Food', date: DateTime.now()),
+        Transaction(
+            id: '3', amount: 200, type: TransactionType.income, sourceAccountId: 1, category: 'Bonus', date: DateTime.now()),
+      ];
+      final income = FinanceCalculator.calculateIncome(txns);
+      expect(income, 300.0);
+    });
+
+    test('calculateExpense sums expenses and transfer fees', () {
+      final txns = [
+        Transaction(
+            id: '1', amount: 100, type: TransactionType.income, sourceAccountId: 1, category: 'Salary', date: DateTime.now()),
+        Transaction(
+            id: '2', amount: 50, type: TransactionType.expense, sourceAccountId: 1, category: 'Food', date: DateTime.now()),
+        Transaction(
+            id: '3', amount: 200, fee: 5.0, type: TransactionType.transfer, sourceAccountId: 1, targetAccountId: 2, category: 'Transfer', date: DateTime.now()),
+      ];
+      final expense = FinanceCalculator.calculateExpense(txns);
+      expect(expense, 55.0); // 50 expense + 5 fee
+    });
+
+    test('calculateBreakdown by Category (Simple)', () {
+      final txns = [
+        Transaction(
+            id: '1', amount: 50, type: TransactionType.expense, sourceAccountId: 1, category: 'Food', date: DateTime.now()),
+        Transaction(
+            id: '2', amount: 30, type: TransactionType.expense, sourceAccountId: 1, category: 'Transport', date: DateTime.now()),
+        Transaction(
+            id: '3', amount: 20, type: TransactionType.expense, sourceAccountId: 1, category: 'Food', date: DateTime.now()),
+      ];
+      final accounts = [Account(id: 1, name: 'Bank', balance: 0, type: AccountType.bank, createdDate: DateTime.now())];
+
+      final breakdown = FinanceCalculator.calculateBreakdown(
+          transactions: txns, accounts: accounts, byCategory: true);
+
+      expect(breakdown['Food'], 70.0);
+      expect(breakdown['Transport'], 30.0);
+    });
+
+    test('calculateBreakdown by Category (Splits)', () {
+      final txns = [
+        Transaction(
+            id: '1',
+            amount: 100,
+            type: TransactionType.expense,
+            sourceAccountId: 1,
+            category: 'Mixed',
+            date: DateTime.now(),
+            splits: [
+              TransactionSplit(amount: 60, category: 'Food'),
+              TransactionSplit(amount: 40, category: 'Entertainment', subCategory: 'Movie'),
+            ]
+        ),
+      ];
+      final accounts = [Account(id: 1, name: 'Bank', balance: 0, type: AccountType.bank, createdDate: DateTime.now())];
+
+      final breakdown = FinanceCalculator.calculateBreakdown(
+          transactions: txns, accounts: accounts, byCategory: true);
+
+      expect(breakdown['Food'], 60.0);
+      expect(breakdown['Entertainment - Movie'], 40.0);
+    });
+
+    test('calculateBreakdown by Account Type', () {
+      final accounts = [
+        Account(id: 1, name: 'Main Bank', balance: 0, type: AccountType.bank, createdDate: DateTime.now()),
+        Account(id: 2, name: 'Cash Wallet', balance: 0, type: AccountType.wallet, createdDate: DateTime.now()),
+      ];
+      final txns = [
+        Transaction(
+            id: '1', amount: 50, type: TransactionType.expense, sourceAccountId: 1, category: 'Food', date: DateTime.now()),
+        Transaction(
+            id: '2', amount: 30, type: TransactionType.expense, sourceAccountId: 2, category: 'Transport', date: DateTime.now()),
+      ];
+
+      final breakdown = FinanceCalculator.calculateBreakdown(
+          transactions: txns, accounts: accounts, byCategory: false);
+
+      expect(breakdown['Bank'], 50.0);
+      expect(breakdown['Wallet'], 30.0);
+    });
+  });
 }
