@@ -14,6 +14,7 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:expense_tracker/biometric_service.dart';
+import 'package:expense_tracker/firebase_options.dart';
 
 // --- ENCRYPTION SERVICE ---
 
@@ -301,7 +302,9 @@ class Transaction {
 
 class AuthService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
-  static final GoogleSignIn _googleSignIn = GoogleSignIn();
+  static final GoogleSignIn _googleSignIn = GoogleSignIn(
+    clientId: Platform.isIOS ? DefaultFirebaseOptions.ios.iosClientId : null,
+  );
 
   static User? get currentUser => _auth.currentUser;
 
@@ -341,7 +344,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (e) {
     debugPrint("Firebase initialization failed: $e");
   }

@@ -106,3 +106,22 @@ modules.xml
 android/local.properties
 
 .flutter-plugins-dependencies
+
+# iOS/Xcode
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/Flutter.podspec
+ios/ServiceDefinitions.json
+ios/Runner/GeneratedPluginRegistrant.h
+ios/Runner/GeneratedPluginRegistrant.m
+**/*.xcodeproj/project.xcworkspace/xcuserdata/
+**/*.xcworkspace/xcuserdata/
+**/Icon\r
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+ios/Podfile.lock
+**/*.lastbuildstate
