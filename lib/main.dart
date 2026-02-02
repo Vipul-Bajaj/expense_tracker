@@ -13,6 +13,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:expense_tracker/biometric_service.dart';
 
 // --- ENCRYPTION SERVICE ---
 
@@ -403,6 +404,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     });
   }
 
+
+
   Future<void> _checkAutoLogin() async {
     final user = AuthService.currentUser;
     if (user != null) {
@@ -410,6 +413,26 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       // 1.5 seconds delay for a smooth welcome experience
       await Future.delayed(const Duration(milliseconds: 1500));
       if (!mounted) return;
+
+      // Check for Biometric Lock
+      final box = await Hive.openBox('settings');
+      final bool isBiometricEnabled = box.get('isBiometricEnabled', defaultValue: false);
+
+      if (isBiometricEnabled) {
+        final bool authenticated = await BiometricAuthService.authenticate();
+        if (!authenticated) {
+          // If failed or cancelled, stay on welcome screen or show error.
+          // For security, checking again or just doing nothing (preventing access) is safest.
+          if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Authentication failed. Please try again.")),
+            );
+             // Re-attempting or showing a specific button to retry would be better UX, 
+             // but for now we just stop the flow.
+             return;
+          }
+        }
+      }
 
       setState(() => _isLoading = true);
       await _migrateLocalData(user.uid);
@@ -1033,6 +1056,75 @@ class _DashboardTabState extends State<DashboardTab> {
                 const Divider(height: 1),
                 const SizedBox(height: 12),
               ],
+
+
+
+              // Biometric Toggle
+              StatefulBuilder(
+                builder: (context, setSheetState) {
+                  // We need to fetch the current state.
+                  // Since we are inside a builder, it's better to manage state properly.
+                  // Ideally the parent should pass this down, but we'll fetch from Hive for simplicity.
+                  return FutureBuilder<Box>(
+                    future: Hive.openBox('settings'),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const SizedBox();
+                      final box = snapshot.data!;
+                      bool isEnabled = box.get('isBiometricEnabled', defaultValue: false);
+
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                              color: isEnabled ? Colors.green.shade50 : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(8)
+                          ),
+                          child: Icon(
+                              Icons.fingerprint,
+                              color: isEnabled ? Colors.green.shade600 : Colors.grey.shade600
+                          ),
+                        ),
+                        title: Text('Biometric Lock',
+                            style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blueGrey.shade800)),
+                        subtitle: Text(
+                            isEnabled ? 'App is locked on startup' : 'Enable to protect your data',
+                            style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                        trailing: Switch(
+                          value: isEnabled,
+                          activeColor: const Color(0xFF2563EB),
+                          onChanged: (val) async {
+                            if (val) {
+                              // Verify biometrics before enabling
+                              bool canCheck = await BiometricAuthService.canCheckBiometrics();
+                              if (!canCheck) {
+                                if (context.mounted) {
+                                   ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text("Biometrics not available on this device")),
+                                  );
+                                }
+                                return;
+                              }
+                              bool authenticated = await BiometricAuthService.authenticate();
+                              if (authenticated) {
+                                await box.put('isBiometricEnabled', true);
+                                setSheetState(() {});
+                              }
+                            } else {
+                              await box.put('isBiometricEnabled', false);
+                              setSheetState(() {});
+                            }
+                          },
+                        ),
+                      );
+                    }
+                  );
+                }
+              ),
+              const SizedBox(height: 8),
 
               // Enhanced Switch Account Option
               ListTile(
