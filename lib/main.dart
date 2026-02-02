@@ -1023,7 +1023,8 @@ class _DashboardTabState extends State<DashboardTab> {
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-          child: Column(
+          child: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
@@ -1181,10 +1182,11 @@ class _DashboardTabState extends State<DashboardTab> {
               const SizedBox(height: 16),
             ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   @override
   Widget build(BuildContext context) {
