@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>505413136406-1hrm3e8s5vr9u010p98o0bn2qkeqsash.apps.googleusercontent.com</string>
+	<string>505413136406-f427rhgha5klfjt593e7iei2p8nfbt86.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.505413136406-1hrm3e8s5vr9u010p98o0bn2qkeqsash</string>
+	<string>com.googleusercontent.apps.505413136406-f427rhgha5klfjt593e7iei2p8nfbt86</string>
 	<key>ANDROID_CLIENT_ID</key>
 	<string>505413136406-33qf25n5n8gnlu1gpma736hj10ar9vqg.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
@@ -15,7 +15,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.example.helloWorld</string>
+	<string>app.vipulbajaj.expensetracker</string>
 	<key>PROJECT_ID</key>
 	<string>expense-tracker-6f119</string>
 	<key>STORAGE_BUCKET</key>
@@ -31,6 +31,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:505413136406:ios:563a51fcdc0759d35d8537</string>
+	<string>1:505413136406:ios:35194c1e6eb68f7f5d8537</string>
 </dict>
 </plist>

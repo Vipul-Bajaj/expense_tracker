@@ -7,17 +7,17 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:505413136406:android:b04895b557f8217d5d8537",
+        "mobilesdk_app_id": "1:505413136406:android:7ddfb024eb3f37815d8537",
         "android_client_info": {
-          "package_name": "com.example.expense_tracker"
+          "package_name": "app.vipulbajaj.expensetracker"
         }
       },
       "oauth_client": [
         {
-          "client_id": "505413136406-33qf25n5n8gnlu1gpma736hj10ar9vqg.apps.googleusercontent.com",
+          "client_id": "505413136406-4b9s4gabgpieqhj7lkrbaivseievuqdh.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.example.expense_tracker",
+            "package_name": "app.vipulbajaj.expensetracker",
             "certificate_hash": "071dc0d81d5a837167712799999506a60ac3112b"
           }
         },
