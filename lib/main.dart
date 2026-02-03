@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:encrypt/encrypt.dart' as enc;
@@ -124,6 +125,64 @@ class FinanceCalculator {
     }
     return breakdown;
   }
+
+  static List<MonthlyData> calculateMonthlyComparison(List<Transaction> transactions) {
+    final Map<String, MonthlyData> monthlyMap = {};
+    final now = DateTime.now();
+
+    // Generate last 6 months
+    for (int i = 5; i >= 0; i--) {
+      final date = DateTime(now.year, now.month - i, 1);
+      final key = DateFormat('MMM yyyy').format(date);
+      monthlyMap[key] = MonthlyData(month: key, income: 0, expense: 0);
+    }
+
+    for (var t in transactions) {
+      final key = DateFormat('MMM yyyy').format(t.date);
+      if (monthlyMap.containsKey(key)) {
+        if (t.type == TransactionType.income) {
+          monthlyMap[key]!.income += t.amount;
+        } else if (t.type == TransactionType.expense) {
+          monthlyMap[key]!.expense += t.amount;
+        } else if (t.type == TransactionType.transfer) {
+          monthlyMap[key]!.expense += t.fee;
+        }
+      }
+    }
+
+    return monthlyMap.values.toList();
+  }
+
+  static String formatCurrency(double amount) {
+    final box = Hive.box('settings');
+    final currencyName = box.get('currency', defaultValue: 'inr');
+    final currency = Currency.values.firstWhere((c) => c.name == currencyName,
+        orElse: () => Currency.inr);
+
+    final convertedAmount = amount * currency.rate;
+
+    final format = NumberFormat.currency(
+        locale: currency == Currency.inr ? 'en_IN' : 'en_US',
+        symbol: currency.symbol,
+        decimalDigits: currency == Currency.inr ? 0 : 2);
+    return format.format(convertedAmount);
+  }
+
+  static String getSelectedCurrencySymbol() {
+    final box = Hive.box('settings');
+    final currencyName = box.get('currency', defaultValue: 'inr');
+    final currency = Currency.values.firstWhere((c) => c.name == currencyName,
+        orElse: () => Currency.inr);
+    return currency.symbol;
+  }
+}
+
+class MonthlyData {
+  final String month;
+  double income;
+  double expense;
+
+  MonthlyData({required this.month, required this.income, required this.expense});
 }
 
 // --- 1. Data Models & Adapters ---
@@ -134,6 +193,18 @@ enum TransactionType { expense, transfer, income }
 
 // Added for Recurring Transactions
 enum RecurrenceFrequency { none, daily, weekly, monthly, yearly }
+
+enum Currency {
+  inr(symbol: '₹', label: 'INR', rate: 1.0),
+  usd(symbol: '\$', label: 'USD', rate: 0.012),
+  eur(symbol: '€', label: 'EUR', rate: 0.011);
+
+  final String symbol;
+  final String label;
+  final double rate; // Rate relative to INR (base)
+
+  const Currency({required this.symbol, required this.label, required this.rate});
+}
 
 class Account {
   final int id;
@@ -361,6 +432,7 @@ void main() async {
   Hive.registerAdapter(TransactionAdapter());
 
   await Hive.openBox('expenses_db');
+  await Hive.openBox('settings');
 
   runApp(const ExpenseTrackerApp());
 }
@@ -420,7 +492,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       if (!mounted) return;
 
       // Check for Biometric Lock
-      final box = await Hive.openBox('settings');
+      final box = Hive.box('settings');
       final bool isBiometricEnabled = box.get('isBiometricEnabled', defaultValue: false);
 
       if (isBiometricEnabled) {
@@ -973,11 +1045,6 @@ class _DashboardTabState extends State<DashboardTab> {
   DateTime _currentMonth = DateTime.now();
   final User? _user = AuthService.currentUser;
 
-  String _formatCurrency(double amount) {
-    final format =
-    NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
-    return format.format(amount);
-  }
 
   void _changeMonth(int offset) {
     setState(() {
@@ -1068,65 +1135,106 @@ class _DashboardTabState extends State<DashboardTab> {
               // Biometric Toggle
               StatefulBuilder(
                 builder: (context, setSheetState) {
-                  // We need to fetch the current state.
-                  // Since we are inside a builder, it's better to manage state properly.
-                  // Ideally the parent should pass this down, but we'll fetch from Hive for simplicity.
-                  return FutureBuilder<Box>(
-                    future: Hive.openBox('settings'),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) return const SizedBox();
-                      final box = snapshot.data!;
-                      bool isEnabled = box.get('isBiometricEnabled', defaultValue: false);
-
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                        leading: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                              color: isEnabled ? Colors.green.shade50 : Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(8)
-                          ),
-                          child: Icon(
-                              Icons.fingerprint,
-                              color: isEnabled ? Colors.green.shade600 : Colors.grey.shade600
-                          ),
-                        ),
-                        title: Text('Biometric Lock',
-                            style: GoogleFonts.inter(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.blueGrey.shade800)),
-                        subtitle: Text(
-                            isEnabled ? 'App is locked on startup' : 'Enable to protect your data',
-                            style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
-                        trailing: Switch(
-                          value: isEnabled,
-                          activeColor: const Color(0xFF2563EB),
-                          onChanged: (val) async {
-                            if (val) {
-                              // Verify biometrics before enabling
-                              bool canCheck = await BiometricAuthService.canCheckBiometrics();
-                              if (!canCheck) {
-                                if (context.mounted) {
-                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text("Biometrics not available on this device")),
-                                  );
-                                }
-                                return;
-                              }
-                              bool authenticated = await BiometricAuthService.authenticate();
-                              if (authenticated) {
-                                await box.put('isBiometricEnabled', true);
-                                setSheetState(() {});
-                              }
-                            } else {
-                              await box.put('isBiometricEnabled', false);
-                              setSheetState(() {});
+                  final box = Hive.box('settings');
+                  bool isEnabled = box.get('isBiometricEnabled', defaultValue: false);
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                          color: isEnabled ? Colors.green.shade50 : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8)
+                      ),
+                      child: Icon(
+                          Icons.fingerprint,
+                          color: isEnabled ? Colors.green.shade600 : Colors.grey.shade600
+                      ),
+                    ),
+                    title: Text('Biometric Lock',
+                        style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blueGrey.shade800)),
+                    subtitle: Text(
+                        isEnabled ? 'App is locked on startup' : 'Enable to protect your data',
+                        style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                    trailing: Switch(
+                      value: isEnabled,
+                      activeColor: const Color(0xFF2563EB),
+                      onChanged: (val) async {
+                        if (val) {
+                          // Verify biometrics before enabling
+                          bool canCheck = await BiometricAuthService.canCheckBiometrics();
+                          if (!canCheck) {
+                            if (context.mounted) {
+                               ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text("Biometrics not available on this device")),
+                              );
                             }
-                          },
-                        ),
-                      );
-                    }
+                            return;
+                          }
+                          bool authenticated = await BiometricAuthService.authenticate();
+                          if (authenticated) {
+                            await box.put('isBiometricEnabled', true);
+                            setSheetState(() {});
+                          }
+                        } else {
+                          await box.put('isBiometricEnabled', false);
+                          setSheetState(() {});
+                        }
+                      },
+                    ),
+                  );
+                }
+              ),
+              const SizedBox(height: 8),
+
+              StatefulBuilder(
+                builder: (context, setSheetState) {
+                  final box = Hive.box('settings');
+                  String currentCurrency = box.get('currency', defaultValue: 'inr');
+
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(8)
+                      ),
+                      child: Icon(
+                          Icons.payments_outlined,
+                          color: Colors.orange.shade600
+                      ),
+                    ),
+                    title: Text('Reference Currency',
+                        style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blueGrey.shade800)),
+                    subtitle: Text(
+                        'Display amounts in ${currentCurrency.toUpperCase()}',
+                        style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                    trailing: DropdownButton<String>(
+                      value: currentCurrency,
+                      underline: const SizedBox(),
+                      items: Currency.values.map((c) {
+                        return DropdownMenuItem(
+                          value: c.name,
+                          child: Text(c.label),
+                        );
+                      }).toList(),
+                      onChanged: (val) async {
+                        if (val != null) {
+                          await box.put('currency', val);
+                          setSheetState(() {});
+                          // Trigger rebuild of the main UI
+                          if (context.mounted) {
+                            (context as Element).markNeedsBuild();
+                          }
+                        }
+                      },
+                    ),
                   );
                 }
               ),
@@ -1274,7 +1382,7 @@ class _DashboardTabState extends State<DashboardTab> {
                     style: GoogleFonts.inter(
                         color: Colors.blueGrey.shade400, fontSize: 14)),
                 const SizedBox(height: 4),
-                Text(_formatCurrency(monthlyTotal),
+                Text(FinanceCalculator.formatCurrency(monthlyTotal),
                     style: GoogleFonts.inter(
                         color: monthlyTotal >= 0
                             ? Colors.blueGrey.shade900
@@ -1298,7 +1406,7 @@ class _DashboardTabState extends State<DashboardTab> {
                                     color: Colors.blueGrey.shade400)),
                           ],
                         ),
-                        Text(_formatCurrency(monthlyIncome),
+                        Text(FinanceCalculator.formatCurrency(monthlyIncome),
                             style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -1320,7 +1428,7 @@ class _DashboardTabState extends State<DashboardTab> {
                                     color: Colors.blueGrey.shade400)),
                           ],
                         ),
-                        Text(_formatCurrency(monthlyExpense),
+                        Text(FinanceCalculator.formatCurrency(monthlyExpense),
                             style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -1961,7 +2069,7 @@ class AccountsTab extends StatelessWidget {
             style: GoogleFonts.inter(fontSize: 12, color: Colors.grey.shade600)),
         const SizedBox(height: 4),
         Text(
-          NumberFormat.compactCurrency(symbol: '₹').format(amount),
+          FinanceCalculator.formatCurrency(amount),
           style: GoogleFonts.inter(
               fontWeight: FontWeight.bold, color: color, fontSize: 14),
         ),
@@ -2054,11 +2162,7 @@ class AccountsTab extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        NumberFormat.currency(
-                            locale: 'en_IN',
-                            symbol: '₹',
-                            decimalDigits: 2)
-                            .format(acc.balance),
+                        FinanceCalculator.formatCurrency(acc.balance),
                         style: GoogleFonts.inter(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -2096,11 +2200,6 @@ class _ReportsTabState extends State<ReportsTab> {
   bool _isPieChart = false;
   ReportType _reportType = ReportType.category;
 
-  String _formatCurrency(double amount) {
-    final format =
-    NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
-    return format.format(amount);
-  }
 
   void _changeMonth(int offset) {
     setState(() {
@@ -2255,6 +2354,44 @@ class _ReportsTabState extends State<ReportsTab> {
           ),
           const SizedBox(height: 24),
           Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(16)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("Last 6 Months Comparison",
+                    style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blueGrey.shade800)),
+                const SizedBox(height: 4),
+                Text("Income (Green) vs Expense (Red)",
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: Colors.blueGrey.shade400)),
+                const SizedBox(height: 32),
+                SizedBox(
+                  height: 150,
+                  width: double.infinity,
+                  child: (() {
+                    final comparisonData =
+                    FinanceCalculator.calculateMonthlyComparison(widget.transactions);
+                    double maxVal = 1.0;
+                    for (var d in comparisonData) {
+                      if (d.income > maxVal) maxVal = d.income;
+                      if (d.expense > maxVal) maxVal = d.expense;
+                    }
+                    return CustomPaint(
+                      painter: BarChartPainter(data: comparisonData, maxAmount: maxVal),
+                    );
+                  })(),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Container(
             width: double.infinity,
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
@@ -2344,7 +2481,7 @@ class _ReportsTabState extends State<ReportsTab> {
                 Text("Total Spending",
                     style: GoogleFonts.inter(
                         color: Colors.white.withOpacity(0.9), fontSize: 16)),
-                Text(_formatCurrency(monthlyExpense),
+                Text(FinanceCalculator.formatCurrency(monthlyExpense),
                     style: GoogleFonts.inter(
                         color: Colors.white,
                         fontSize: 24,
@@ -2399,7 +2536,7 @@ class _ReportsTabState extends State<ReportsTab> {
                           color: Colors.blueGrey.shade800),
                       overflow: TextOverflow.ellipsis),
                 ),
-                Text(_formatCurrency(entry.value),
+                Text(FinanceCalculator.formatCurrency(entry.value),
                     style: GoogleFonts.inter(
                         fontWeight: FontWeight.bold,
                         color: Colors.blueGrey.shade800))
@@ -2451,7 +2588,7 @@ class _ReportsTabState extends State<ReportsTab> {
                     child: Text(entry.key,
                         style: GoogleFonts.inter(fontSize: 14),
                         overflow: TextOverflow.ellipsis)),
-                Text(_formatCurrency(entry.value),
+                Text(FinanceCalculator.formatCurrency(entry.value),
                     style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
               ],
             ),
@@ -2502,6 +2639,60 @@ class PieChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+class BarChartPainter extends CustomPainter {
+  final List<MonthlyData> data;
+  final double maxAmount;
+
+  BarChartPainter({required this.data, required this.maxAmount});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paintIncome = Paint()..color = Colors.green.shade400;
+    final paintExpense = Paint()..color = Colors.red.shade400;
+    final textPainter = TextPainter(textDirection: ui.TextDirection.ltr);
+
+    double spacing = size.width / data.length;
+    double barWidth = (spacing * 0.6) / 2;
+
+    for (int i = 0; i < data.length; i++) {
+      double x = i * spacing + spacing / 2;
+      
+      // Income Bar
+      double incomeHeight = maxAmount > 0 ? (data[i].income / maxAmount) * size.height : 0;
+      canvas.drawRRect(
+        RRect.fromRectAndCorners(
+          Rect.fromLTWH(x - barWidth, size.height - incomeHeight, barWidth - 2, incomeHeight),
+          topLeft: const Radius.circular(4),
+          topRight: const Radius.circular(4),
+        ),
+        paintIncome,
+      );
+
+      // Expense Bar
+      double expenseHeight = maxAmount > 0 ? (data[i].expense / maxAmount) * size.height : 0;
+      canvas.drawRRect(
+        RRect.fromRectAndCorners(
+          Rect.fromLTWH(x + 2, size.height - expenseHeight, barWidth - 2, expenseHeight),
+          topLeft: const Radius.circular(4),
+          topRight: const Radius.circular(4),
+        ),
+        paintExpense,
+      );
+
+      // Month Label
+      textPainter.text = TextSpan(
+        text: data[i].month.split(' ')[0],
+        style: GoogleFonts.inter(fontSize: 10, color: Colors.blueGrey.shade400),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(x - textPainter.width / 2, size.height + 8));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant BarChartPainter oldDelegate) => true;
 }
 
 // --- 7. Categories Tab ---
@@ -2842,8 +3033,7 @@ class TransactionItem extends StatelessWidget {
   }
 
   void _showTransactionDetails(BuildContext context) {
-    final formatCurrency =
-    NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    const formatCurrency = FinanceCalculator.formatCurrency;
 
     final accountName = accounts
         .firstWhere((a) => a.id == transaction.sourceAccountId,
@@ -2891,9 +3081,9 @@ class TransactionItem extends StatelessWidget {
                   accountName),
               if (targetAccountName != null)
                 _detailRow("To Account", targetAccountName),
-              _detailRow("Amount", formatCurrency.format(transaction.amount)),
+              _detailRow("Amount", formatCurrency(transaction.amount)),
               if (transaction.fee > 0)
-                _detailRow("Fee", formatCurrency.format(transaction.fee)),
+                _detailRow("Fee", formatCurrency(transaction.fee)),
               if (transaction.recurrence != RecurrenceFrequency.none)
                 _detailRow(
                     "Recurring",
@@ -2914,7 +3104,7 @@ class TransactionItem extends StatelessWidget {
                         Text(
                             "${s.category}${s.subCategory != null ? ' - ${s.subCategory}' : ''}",
                             style: GoogleFonts.inter(fontSize: 13)),
-                        Text(formatCurrency.format(s.amount),
+                        Text(formatCurrency(s.amount),
                             style: GoogleFonts.inter(
                                 fontWeight: FontWeight.w500)),
                       ],
@@ -2974,9 +3164,8 @@ class TransactionItem extends StatelessWidget {
     IconData icon = isIncome
         ? Icons.arrow_upward
         : (isTransfer ? Icons.swap_horiz : Icons.trending_down);
-    String amountText =
-    NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0)
-        .format(transaction.amount + (isTransfer ? transaction.fee : 0));
+    String amountText = FinanceCalculator.formatCurrency(
+        transaction.amount + (isTransfer ? transaction.fee : 0));
 
     return GestureDetector(
       onTap: () => _showTransactionDetails(context),
@@ -3267,8 +3456,8 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
               ],
               style:
               GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
-              decoration: const InputDecoration(
-                  prefixText: '₹ ',
+              decoration: InputDecoration(
+                  prefixText: '${FinanceCalculator.getSelectedCurrencySymbol()} ',
                   border: InputBorder.none,
                   hintText: '0.00 (Optional)')),
           GestureDetector(
@@ -3610,7 +3799,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     if ((currentTotal + amt) > totalAmount + 0.01) {
       setState(() {
         _splitErrorText =
-        "Exceeds total! Rem: ₹${(totalAmount - currentTotal).toStringAsFixed(2)}";
+        "Exceeds total! Rem: ${FinanceCalculator.getSelectedCurrencySymbol()}${(totalAmount - currentTotal).toStringAsFixed(2)}";
       });
       return;
     }
@@ -3761,9 +3950,9 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 onChanged: (val) => setState(() {}),
                 style: GoogleFonts.inter(
                     fontSize: 24, fontWeight: FontWeight.bold),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                     labelText: "AMOUNT",
-                    prefixText: '₹ ',
+                    prefixText: '${FinanceCalculator.getSelectedCurrencySymbol()} ',
                     border: InputBorder.none)),
             const Divider(),
             const SizedBox(height: 16),
@@ -3809,9 +3998,9 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
                   ],
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                       labelText: "FEE",
-                      prefixText: '₹ ',
+                      prefixText: '${FinanceCalculator.getSelectedCurrencySymbol()} ',
                       border: InputBorder.none)),
             ],
             if (_selectedType == TransactionType.income) ...[
@@ -3869,7 +4058,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 child: Text(
                                     '${entry.value.category} > ${entry.value.subCategory}',
                                     style: GoogleFonts.inter(fontSize: 13))),
-                            Text('₹${entry.value.amount.toInt()}',
+                            Text('${FinanceCalculator.getSelectedCurrencySymbol()}${entry.value.amount.toInt()}',
                                 style: GoogleFonts.inter(
                                     fontWeight: FontWeight.bold)),
                             IconButton(
