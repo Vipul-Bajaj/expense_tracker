@@ -15,6 +15,7 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:expense_tracker/biometric_service.dart';
+import 'package:expense_tracker/currency_service.dart';
 import 'package:expense_tracker/firebase_options.dart';
 
 // --- ENCRYPTION SERVICE ---
@@ -153,13 +154,35 @@ class FinanceCalculator {
     return monthlyMap.values.toList();
   }
 
-  static String formatCurrency(double amount) {
+  static Currency _getCurrencyConfig() {
     final box = Hive.box('settings');
     final currencyName = box.get('currency', defaultValue: 'inr');
-    final currency = Currency.values.firstWhere((c) => c.name == currencyName,
+    return Currency.values.firstWhere((c) => c.name == currencyName,
         orElse: () => Currency.inr);
+  }
 
-    final convertedAmount = amount * currency.rate;
+  static double _getEffectiveRate(Currency currency) {
+    if (currency == Currency.inr) return 1.0;
+    final box = Hive.box('settings');
+    final String key = 'rate_${currency.name}';
+    return box.get(key, defaultValue: currency.rate);
+  }
+
+  static double convertFromBase(double amount) {
+    final currency = _getCurrencyConfig();
+    final rate = _getEffectiveRate(currency);
+    return amount * rate;
+  }
+
+  static double convertToBase(double amount) {
+    final currency = _getCurrencyConfig();
+    final rate = _getEffectiveRate(currency);
+    return amount / rate;
+  }
+
+  static String formatCurrency(double amount) {
+    final currency = _getCurrencyConfig();
+    final convertedAmount = convertFromBase(amount);
 
     final format = NumberFormat.currency(
         locale: currency == Currency.inr ? 'en_IN' : 'en_US',
@@ -169,11 +192,7 @@ class FinanceCalculator {
   }
 
   static String getSelectedCurrencySymbol() {
-    final box = Hive.box('settings');
-    final currencyName = box.get('currency', defaultValue: 'inr');
-    final currency = Currency.values.firstWhere((c) => c.name == currencyName,
-        orElse: () => Currency.inr);
-    return currency.symbol;
+    return _getCurrencyConfig().symbol;
   }
 }
 
@@ -952,72 +971,77 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                   }
                 }
 
-                final List<Widget> pages = [
-                  DashboardTab(accounts: accounts, transactions: transactions),
-                  TransactionsTab(
-                      transactions: transactions,
-                      accounts: accounts,
-                      categories: categories),
-                  AccountsTab(accounts: accounts, transactions: transactions), // Passed transactions
-                  ReportsTab(accounts: accounts, transactions: transactions),
-                  CategoriesTab(categories: categories),
-                ];
+                return ValueListenableBuilder(
+                  valueListenable: Hive.box('settings').listenable(),
+                  builder: (context, box, _) {
+                    final List<Widget> pages = [
+                      DashboardTab(accounts: accounts, transactions: transactions),
+                      TransactionsTab(
+                          transactions: transactions,
+                          accounts: accounts,
+                          categories: categories),
+                      AccountsTab(accounts: accounts, transactions: transactions), // Passed transactions
+                      ReportsTab(accounts: accounts, transactions: transactions),
+                      CategoriesTab(categories: categories),
+                    ];
 
-                return Scaffold(
-                  body: pages[_currentIndex],
-                  bottomNavigationBar: BottomNavigationBar(
-                    currentIndex: _currentIndex,
-                    onTap: (idx) => setState(() => _currentIndex = idx),
-                    selectedItemColor: const Color(0xFF2563EB),
-                    unselectedItemColor: Colors.grey,
-                    showUnselectedLabels: true,
-                    type: BottomNavigationBarType.fixed,
-                    items: const [
-                      BottomNavigationBarItem(
-                          icon: Icon(Icons.dashboard_outlined),
-                          activeIcon: Icon(Icons.dashboard),
-                          label: 'Dashboard'),
-                      BottomNavigationBarItem(
-                          icon: Icon(Icons.history_outlined),
-                          activeIcon: Icon(Icons.history),
-                          label: 'History'),
-                      BottomNavigationBarItem(
-                          icon: Icon(Icons.account_balance_wallet_outlined),
-                          activeIcon: Icon(Icons.account_balance_wallet),
-                          label: 'Accounts'),
-                      BottomNavigationBarItem(
-                          icon: Icon(Icons.bar_chart),
-                          activeIcon: Icon(Icons.bar_chart),
-                          label: 'Reports'),
-                      BottomNavigationBarItem(
-                          icon: Icon(Icons.category_outlined),
-                          activeIcon: Icon(Icons.category),
-                          label: 'Categories'),
-                    ],
-                  ),
-                  floatingActionButton: _currentIndex == 0
-                      ? FloatingActionButton(
-                    onPressed: () {
-                      if (accounts.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'Please add an account first (Accounts Tab)!'),
-                                backgroundColor: Colors.red));
-                        return;
-                      }
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (_) =>
-                            AddTransactionSheet(accounts: accounts),
-                      );
-                    },
-                    backgroundColor: const Color(0xFF2563EB),
-                    child: const Icon(Icons.add, color: Colors.white),
-                  )
-                      : null,
+                    return Scaffold(
+                      body: pages[_currentIndex],
+                      bottomNavigationBar: BottomNavigationBar(
+                        currentIndex: _currentIndex,
+                        onTap: (idx) => setState(() => _currentIndex = idx),
+                        selectedItemColor: const Color(0xFF2563EB),
+                        unselectedItemColor: Colors.grey,
+                        showUnselectedLabels: true,
+                        type: BottomNavigationBarType.fixed,
+                        items: const [
+                          BottomNavigationBarItem(
+                              icon: Icon(Icons.dashboard_outlined),
+                              activeIcon: Icon(Icons.dashboard),
+                              label: 'Dashboard'),
+                          BottomNavigationBarItem(
+                              icon: Icon(Icons.history_outlined),
+                              activeIcon: Icon(Icons.history),
+                              label: 'History'),
+                          BottomNavigationBarItem(
+                              icon: Icon(Icons.account_balance_wallet_outlined),
+                              activeIcon: Icon(Icons.account_balance_wallet),
+                              label: 'Accounts'),
+                          BottomNavigationBarItem(
+                              icon: Icon(Icons.bar_chart),
+                              activeIcon: Icon(Icons.bar_chart),
+                              label: 'Reports'),
+                          BottomNavigationBarItem(
+                              icon: Icon(Icons.category_outlined),
+                              activeIcon: Icon(Icons.category),
+                              label: 'Categories'),
+                        ],
+                      ),
+                      floatingActionButton: _currentIndex == 0
+                          ? FloatingActionButton(
+                        onPressed: () {
+                          if (accounts.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Please add an account first (Accounts Tab)!'),
+                                    backgroundColor: Colors.red));
+                            return;
+                          }
+                          showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (_) =>
+                                AddTransactionSheet(accounts: accounts),
+                          );
+                        },
+                        backgroundColor: const Color(0xFF2563EB),
+                        child: const Icon(Icons.add, color: Colors.white),
+                      )
+                          : null,
+                    );
+                  },
                 );
               },
             );
@@ -1194,7 +1218,7 @@ class _DashboardTabState extends State<DashboardTab> {
                   final box = Hive.box('settings');
                   String currentCurrency = box.get('currency', defaultValue: 'inr');
 
-                  return ListTile(
+                  final currencyListTile = ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Container(
                       padding: const EdgeInsets.all(8),
@@ -1228,13 +1252,57 @@ class _DashboardTabState extends State<DashboardTab> {
                         if (val != null) {
                           await box.put('currency', val);
                           setSheetState(() {});
-                          // Trigger rebuild of the main UI
-                          if (context.mounted) {
-                            (context as Element).markNeedsBuild();
-                          }
                         }
                       },
                     ),
+                  );
+
+                  return Column(
+                    children: [
+                      currencyListTile,
+                      ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8)
+                          ),
+                          child: Icon(
+                              Icons.sync,
+                              color: Colors.blue.shade600
+                          ),
+                        ),
+                        title: Text('Update Rates',
+                            style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blueGrey.shade800)),
+                        subtitle: Text(
+                            'Last updated: ${CurrencyService.getLastUpdatedText()}',
+                            style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.refresh),
+                          onPressed: () async {
+                            final success = await CurrencyService.updateRates();
+                            if (success) {
+                              setSheetState(() {});
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Rates updated successfully')),
+                                );
+                              }
+                            } else {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Failed to update rates')),
+                                );
+                              }
+                            }
+                          },
+                        ),
+                      ),
+                    ],
                   );
                 }
               ),
@@ -3310,7 +3378,9 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
     super.initState();
     if (widget.existingAccount != null) {
       _nameCtrl.text = widget.existingAccount!.name;
-      _balanceCtrl.text = widget.existingAccount!.balance.toString();
+      // Convert from base INR to current display currency
+      final displayBalance = FinanceCalculator.convertFromBase(widget.existingAccount!.balance);
+      _balanceCtrl.text = displayBalance.toStringAsFixed(2);
       _selectedType = widget.existingAccount!.type;
       _selectedDate = widget.existingAccount!.createdDate;
     }
@@ -3320,7 +3390,9 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
     final user = AuthService.currentUser;
     if (user == null) return;
 
-    final double balance = double.tryParse(_balanceCtrl.text) ?? 0.0;
+    final double displayBalance = double.tryParse(_balanceCtrl.text) ?? 0.0;
+    // Convert from current display currency back to base INR
+    final double balance = FinanceCalculator.convertToBase(displayBalance);
     final int id =
         widget.existingAccount?.id ?? DateTime.now().millisecondsSinceEpoch;
 
@@ -3564,8 +3636,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     if (widget.existingTransaction != null) {
       final t = widget.existingTransaction!;
       _selectedType = t.type;
-      _amountCtrl.text = t.amount.toString();
-      _feeCtrl.text = t.fee.toString();
+      // Convert from base INR to current display currency
+      final displayAmount = FinanceCalculator.convertFromBase(t.amount);
+      final displayFee = FinanceCalculator.convertFromBase(t.fee);
+      _amountCtrl.text = displayAmount.toStringAsFixed(2);
+      _feeCtrl.text = displayFee.toStringAsFixed(2);
       _noteCtrl.text = t.note ?? '';
       _selectedSourceId = t.sourceAccountId;
       if (t.targetAccountId != null) _selectedTargetId = t.targetAccountId!;
@@ -3575,7 +3650,12 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       _recurrence = t.recurrence;
       if (t.splits != null && t.splits!.isNotEmpty) {
         _isSplitMode = true;
-        _currentSplits.addAll(t.splits!);
+        // Also convert splits from base
+        _currentSplits.addAll(t.splits!.map((s) => TransactionSplit(
+          category: s.category,
+          subCategory: s.subCategory,
+          amount: FinanceCalculator.convertFromBase(s.amount),
+        )));
       }
     }
   }
@@ -3668,16 +3748,20 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     if (user == null) return;
     setState(() => _submitErrorText = null);
 
-    final double amount = double.tryParse(_amountCtrl.text) ?? 0;
-    final double fee = double.tryParse(_feeCtrl.text) ?? 0;
-    if (amount <= 0) return;
+    final double displayAmount = double.tryParse(_amountCtrl.text) ?? 0;
+    final double displayFee = double.tryParse(_feeCtrl.text) ?? 0;
+    if (displayAmount <= 0) return;
+
+    // Convert from current display currency back to base INR
+    final double amount = FinanceCalculator.convertToBase(displayAmount);
+    final double fee = FinanceCalculator.convertToBase(displayFee);
 
     if (_selectedType == TransactionType.expense && _isSplitMode) {
       final splitTotal = _currentSplits.fold(0.0, (sum, s) => sum + s.amount);
-      if ((splitTotal - amount).abs() > 0.01) {
+      if ((splitTotal - displayAmount).abs() > 0.01) {
         setState(() {
           _submitErrorText =
-          "Split total (${splitTotal.toStringAsFixed(2)}) != Amount (${amount.toStringAsFixed(2)})";
+          "Split total (${splitTotal.toStringAsFixed(2)}) != Amount (${displayAmount.toStringAsFixed(2)})";
         });
         return;
       }
@@ -3756,7 +3840,13 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
           ? (_isSplitMode ? null : _selectedSubCategory)
           : null,
       date: _selectedDate,
-      splits: _isSplitMode ? _currentSplits : null,
+      splits: _isSplitMode
+          ? _currentSplits.map((s) => TransactionSplit(
+        category: s.category,
+        subCategory: s.subCategory,
+        amount: FinanceCalculator.convertToBase(s.amount),
+      )).toList()
+          : null,
       note: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
       recurrence: _recurrence,
     );
