@@ -467,20 +467,50 @@ class ExpenseTrackerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Expense Tracker',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB)),
-          textTheme: GoogleFonts.interTextTheme(),
-          scaffoldBackgroundColor: const Color(0xFFF8FAFC),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: Colors.white,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-          )),
-      home: const WelcomeScreen(),
+    return ValueListenableBuilder(
+      valueListenable: Hive.box('settings').listenable(),
+      builder: (context, box, _) {
+        final themeModeName = box.get('themeMode', defaultValue: 'system');
+        final ThemeMode themeMode = ThemeMode.values.firstWhere(
+          (t) => t.name == themeModeName,
+          orElse: () => ThemeMode.system,
+        );
+
+        return MaterialApp(
+          title: 'Expense Tracker',
+          debugShowCheckedModeBanner: false,
+          themeMode: themeMode,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF2563EB),
+              brightness: Brightness.light,
+            ),
+            textTheme: GoogleFonts.interTextTheme(),
+            scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.white,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+            ),
+          ),
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF2563EB),
+              brightness: Brightness.dark,
+            ),
+            textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
+            scaffoldBackgroundColor: const Color(0xFF0F172A),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Color(0xFF1E293B),
+              elevation: 0,
+              scrolledUnderElevation: 0,
+            ),
+          ),
+          home: const WelcomeScreen(),
+        );
+      },
     );
   }
 }
@@ -652,7 +682,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final bool showLoginOptions = user == null && !_isLoading;
 
     return Scaffold(
-      backgroundColor: Colors.white,
       body: SafeArea(
         child: Center(
           child: Padding(
@@ -665,8 +694,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                      color: Colors.blue.shade50, shape: BoxShape.circle),
-                  child: Icon(Icons.wallet, size: 64, color: Colors.blue.shade600),
+                      color: Theme.of(context).colorScheme.primaryContainer, shape: BoxShape.circle),
+                  child: Icon(Icons.wallet, size: 64, color: Theme.of(context).colorScheme.primary),
                 ),
                 const SizedBox(height: 40),
 
@@ -675,7 +704,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   style: GoogleFonts.inter(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey.shade900),
+                      color: Theme.of(context).colorScheme.onSurface),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
@@ -686,7 +715,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     style: GoogleFonts.inter(
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
-                        color: Colors.blueGrey.shade700),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
 
@@ -696,7 +725,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     'Loading your finances...',
                     style: GoogleFonts.inter(
                         fontSize: 16,
-                        color: Colors.blueGrey.shade400
+                        color: Theme.of(context).colorScheme.onSurfaceVariant
                     ),
                   ),
                   const SizedBox(height: 32),
@@ -710,7 +739,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                     'Track expenses, income, manage accounts, and analyze your financial health.',
                     style: GoogleFonts.inter(
                         fontSize: 14,
-                        color: Colors.blueGrey.shade500,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         height: 1.5),
                     textAlign: TextAlign.center,
                   ),
@@ -728,9 +757,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                             style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.blueGrey.shade700)),
+                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: Colors.blueGrey.shade200),
+                          side: BorderSide(color: Theme.of(context).dividerColor),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16)),
                         ),
@@ -1013,8 +1042,8 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                       bottomNavigationBar: BottomNavigationBar(
                         currentIndex: _currentIndex,
                         onTap: (idx) => setState(() => _currentIndex = idx),
-                        selectedItemColor: const Color(0xFF2563EB),
-                        unselectedItemColor: Colors.grey,
+                        selectedItemColor: Theme.of(context).colorScheme.primary,
+                        unselectedItemColor: Theme.of(context).colorScheme.onSurfaceVariant,
                         showUnselectedLabels: true,
                         type: BottomNavigationBarType.fixed,
                         items: const [
@@ -1132,9 +1161,9 @@ class _DashboardTabState extends State<DashboardTab> {
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
           child: SingleChildScrollView(
@@ -1146,7 +1175,7 @@ class _DashboardTabState extends State<DashboardTab> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 24),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
+                  color: Theme.of(context).dividerColor,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1166,11 +1195,11 @@ class _DashboardTabState extends State<DashboardTab> {
                 Text(
                   _user!.displayName ?? 'User',
                   style: GoogleFonts.inter(
-                      fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueGrey.shade900),
+                      fontSize: 20, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface),
                 ),
                 Text(
                   _user!.email ?? '',
-                  style: GoogleFonts.inter(color: Colors.blueGrey.shade500, fontSize: 14),
+                  style: GoogleFonts.inter(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
                 ),
                 const SizedBox(height: 24),
                 const Divider(height: 1),
@@ -1258,10 +1287,10 @@ class _DashboardTabState extends State<DashboardTab> {
                         style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: Colors.blueGrey.shade800)),
+                            color: Theme.of(context).colorScheme.onSurface)),
                     subtitle: Text(
                         'Display amounts in ${currentCurrency.toUpperCase()}',
-                        style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                        style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     trailing: DropdownButton<String>(
                       value: currentCurrency,
                       underline: const SizedBox(),
@@ -1280,9 +1309,51 @@ class _DashboardTabState extends State<DashboardTab> {
                     ),
                   );
 
+                  String currentThemeMode = box.get('themeMode', defaultValue: 'system');
+
+                  final themeListTile = ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                          color: Colors.purple.shade50,
+                          borderRadius: BorderRadius.circular(8)
+                      ),
+                      child: Icon(
+                          currentThemeMode == 'dark' ? Icons.dark_mode_outlined : (currentThemeMode == 'light' ? Icons.light_mode_outlined : Icons.brightness_auto_outlined),
+                          color: Colors.purple.shade600
+                      ),
+                    ),
+                    title: Text('App Theme',
+                        style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface)),
+                    subtitle: Text(
+                        'Current: ${currentThemeMode[0].toUpperCase()}${currentThemeMode.substring(1)}',
+                        style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    trailing: DropdownButton<String>(
+                      value: currentThemeMode,
+                      underline: const SizedBox(),
+                      items: ['light', 'dark', 'system'].map((m) {
+                        return DropdownMenuItem(
+                          value: m,
+                          child: Text(m[0].toUpperCase() + m.substring(1)),
+                        );
+                      }).toList(),
+                      onChanged: (val) async {
+                        if (val != null) {
+                          await box.put('themeMode', val);
+                          setSheetState(() {});
+                        }
+                      },
+                    ),
+                  );
+
                   return Column(
                     children: [
                       currencyListTile,
+                      themeListTile,
                       ListTile(
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                         leading: Container(
@@ -1300,10 +1371,10 @@ class _DashboardTabState extends State<DashboardTab> {
                             style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
-                                color: Colors.blueGrey.shade800)),
+                                color: Theme.of(context).colorScheme.onSurface)),
                         subtitle: Text(
                             'Last updated: ${CurrencyService.getLastUpdatedText()}',
-                            style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                            style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                         trailing: IconButton(
                           icon: const Icon(Icons.refresh),
                           onPressed: () async {
@@ -1346,9 +1417,9 @@ class _DashboardTabState extends State<DashboardTab> {
                     style: GoogleFonts.inter(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
-                        color: Colors.blueGrey.shade800)),
-                subtitle: Text('Sign in with a different Google account',
-                    style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                        color: Theme.of(context).colorScheme.onSurface)),
+                subtitle: Text('Login with a different email',
+                    style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _switchAccount(context);
@@ -1401,11 +1472,10 @@ class _DashboardTabState extends State<DashboardTab> {
     final double monthlyTotal = monthlyIncome - monthlyExpense;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text('Dashboard',
             style: GoogleFonts.inter(
-                fontWeight: FontWeight.bold, color: Colors.blueGrey.shade800)),
+                fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
         actions: [
           if (_user != null) ...[
             GestureDetector(
@@ -1442,11 +1512,11 @@ class _DashboardTabState extends State<DashboardTab> {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.blueGrey.withOpacity(0.05),
+                      color: Colors.black.withOpacity(0.05),
                       blurRadius: 10,
                       offset: const Offset(0, 5))
                 ]),
@@ -1462,7 +1532,7 @@ class _DashboardTabState extends State<DashboardTab> {
                         style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: Colors.blueGrey.shade800)),
+                            color: Theme.of(context).colorScheme.onSurface)),
                     IconButton(
                         onPressed: () => _changeMonth(1),
                         icon: const Icon(Icons.chevron_right)),
@@ -1471,12 +1541,12 @@ class _DashboardTabState extends State<DashboardTab> {
                 const SizedBox(height: 16),
                 Text('Total Balance',
                     style: GoogleFonts.inter(
-                        color: Colors.blueGrey.shade400, fontSize: 14)),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14)),
                 const SizedBox(height: 4),
                 Text(FinanceCalculator.formatCurrency(monthlyTotal),
                     style: GoogleFonts.inter(
                         color: monthlyTotal >= 0
-                            ? Colors.blueGrey.shade900
+                            ? Theme.of(context).colorScheme.onSurface
                             : Colors.red.shade600,
                         fontSize: 36,
                         fontWeight: FontWeight.bold)),
@@ -1494,7 +1564,7 @@ class _DashboardTabState extends State<DashboardTab> {
                             Text('Income',
                                 style: GoogleFonts.inter(
                                     fontSize: 12,
-                                    color: Colors.blueGrey.shade400)),
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
                           ],
                         ),
                         Text(FinanceCalculator.formatCurrency(monthlyIncome),
@@ -1505,7 +1575,7 @@ class _DashboardTabState extends State<DashboardTab> {
                       ],
                     ),
                     Container(
-                        height: 30, width: 1, color: Colors.grey.shade200),
+                        height: 30, width: 1, color: Theme.of(context).dividerColor),
                     Column(
                       children: [
                         Row(
@@ -1516,7 +1586,7 @@ class _DashboardTabState extends State<DashboardTab> {
                             Text('Expense',
                                 style: GoogleFonts.inter(
                                     fontSize: 12,
-                                    color: Colors.blueGrey.shade400)),
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
                           ],
                         ),
                         Text(FinanceCalculator.formatCurrency(monthlyExpense),
@@ -1536,7 +1606,7 @@ class _DashboardTabState extends State<DashboardTab> {
               style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: Colors.blueGrey.shade300,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   letterSpacing: 1)),
           const SizedBox(height: 12),
           if (monthlyTransactions.isEmpty)
@@ -1545,7 +1615,7 @@ class _DashboardTabState extends State<DashboardTab> {
                     padding: const EdgeInsets.all(20),
                     child: Text('No transactions in this month',
                         style: GoogleFonts.inter(
-                            color: Colors.blueGrey.shade300))))
+                            color: Theme.of(context).colorScheme.onSurfaceVariant))))
           else
             ...monthlyTransactions.take(10).map((txn) =>
                 TransactionItem(transaction: txn, accounts: widget.accounts)),
@@ -1832,7 +1902,6 @@ class _TransactionsTabState extends State<TransactionsTab> {
     filtered.sort((a, b) => b.date.compareTo(a.date));
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: _isSearchVisible
             ? TextField(
@@ -1847,7 +1916,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
             : Text("Transactions",
             style: GoogleFonts.inter(
                 fontWeight: FontWeight.bold,
-                color: Colors.blueGrey.shade800)),
+                color: Theme.of(context).colorScheme.onSurface)),
         actions: [
           IconButton(
             icon: Icon(_isSearchVisible ? Icons.close : Icons.search),
@@ -1867,7 +1936,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                     _selectedType != null ||
                     _selectedAccountId != null)
                     ? const Color(0xFF2563EB)
-                    : Colors.blueGrey.shade700,
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
                 onPressed: _showFilterSheet,
               ),
               if (_selectedCategory != null ||
@@ -1894,9 +1963,9 @@ class _TransactionsTabState extends State<TransactionsTab> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               border:
-              Border(bottom: BorderSide(color: Colors.blueGrey.shade50)),
+              Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
             ),
             child: Row(
               children: [
@@ -1906,15 +1975,15 @@ class _TransactionsTabState extends State<TransactionsTab> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
+                        color: Theme.of(context).colorScheme.surfaceVariant,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade200),
+                        border: Border.all(color: Theme.of(context).dividerColor),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const Icon(Icons.calendar_today,
-                              size: 14, color: Colors.blueGrey),
+                              size: 14, color: Colors.blue),
                           const SizedBox(width: 8),
                           Text(
                             _selectedDateRange != null
@@ -1923,7 +1992,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                             style: GoogleFonts.inter(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 14,
-                                color: Colors.blueGrey.shade800),
+                                color: Theme.of(context).colorScheme.onSurface),
                           ),
                         ],
                       ),
@@ -2106,9 +2175,9 @@ class AccountsTab extends StatelessWidget {
         maxChildSize: 0.9,
         minChildSize: 0.5,
         builder: (_, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             children: [
@@ -2117,7 +2186,7 @@ class AccountsTab extends StatelessWidget {
                 height: 4,
                 margin: const EdgeInsets.symmetric(vertical: 12),
                 decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
+                    color: Theme.of(context).dividerColor,
                     borderRadius: BorderRadius.circular(2)),
               ),
               Text(account.name,
@@ -2157,7 +2226,7 @@ class AccountsTab extends StatelessWidget {
     return Column(
       children: [
         Text(label,
-            style: GoogleFonts.inter(fontSize: 12, color: Colors.grey.shade600)),
+            style: GoogleFonts.inter(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 4),
         Text(
           FinanceCalculator.formatCurrency(amount),
@@ -2184,12 +2253,11 @@ class AccountsTab extends StatelessWidget {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
           title: Text('Accounts',
               style: GoogleFonts.inter(
                   fontWeight: FontWeight.bold,
-                  color: Colors.blueGrey.shade800))),
+                  color: Theme.of(context).colorScheme.onSurface))),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAccountSheet(context),
         backgroundColor: const Color(0xFF2563EB),
@@ -2212,7 +2280,7 @@ class AccountsTab extends StatelessWidget {
                 style: GoogleFonts.inter(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: Colors.blueGrey.shade400),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
             ...typeAccounts.map((acc) => Padding(
@@ -2223,10 +2291,10 @@ class AccountsTab extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(16),
                       border:
-                      Border.all(color: Colors.blueGrey.shade50)),
+                      Border.all(color: Theme.of(context).dividerColor)),
                   child: Row(
                     children: [
                       Container(
@@ -2247,7 +2315,7 @@ class AccountsTab extends StatelessWidget {
                                 style: GoogleFonts.inter(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
-                                    color: Colors.blueGrey.shade800)),
+                                    color: Theme.of(context).colorScheme.onSurface)),
                             // Removed type text since it's now a section header
                           ],
                         ),
@@ -2257,7 +2325,7 @@ class AccountsTab extends StatelessWidget {
                         style: GoogleFonts.inter(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: Colors.blueGrey.shade900),
+                            color: Theme.of(context).colorScheme.onSurface),
                       ),
                     ],
                   ),
@@ -2397,16 +2465,15 @@ class _ReportsTabState extends State<ReportsTab> {
         breakdown.entries.toList()..sort((a, b) => b.value.compareTo(a.value)));
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: Text('Reports',
-            style: GoogleFonts.inter(
-                fontWeight: FontWeight.bold, color: Colors.blueGrey.shade800)),
+          title: Text('Reports',
+              style: GoogleFonts.inter(
+                  fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
         actions: [
           IconButton(
             onPressed: () => setState(() => _isPieChart = !_isPieChart),
             icon: Icon(_isPieChart ? Icons.list : Icons.pie_chart,
-                color: Colors.blueGrey.shade700),
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
             tooltip: _isPieChart ? 'Switch to List' : 'Switch to Pie Chart',
           ),
           TextButton.icon(
@@ -2425,7 +2492,7 @@ class _ReportsTabState extends State<ReportsTab> {
           Container(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
             decoration: BoxDecoration(
-                color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(16)),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -2436,7 +2503,7 @@ class _ReportsTabState extends State<ReportsTab> {
                     style: GoogleFonts.inter(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
-                        color: Colors.blueGrey.shade800)),
+                        color: Theme.of(context).colorScheme.onSurface)),
                 IconButton(
                     onPressed: () => _changeMonth(1),
                     icon: const Icon(Icons.chevron_right)),
@@ -2447,7 +2514,7 @@ class _ReportsTabState extends State<ReportsTab> {
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-                color: Colors.white, borderRadius: BorderRadius.circular(16)),
+                color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(16)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2455,11 +2522,11 @@ class _ReportsTabState extends State<ReportsTab> {
                     style: GoogleFonts.inter(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: Colors.blueGrey.shade800)),
+                        color: Theme.of(context).colorScheme.onSurface)),
                 const SizedBox(height: 4),
                 Text("Income (Green) vs Expense (Red)",
                     style: GoogleFonts.inter(
-                        fontSize: 12, color: Colors.blueGrey.shade400)),
+                        fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 const SizedBox(height: 32),
                 SizedBox(
                   height: 150,
@@ -2486,7 +2553,7 @@ class _ReportsTabState extends State<ReportsTab> {
             width: double.infinity,
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: Colors.grey.shade200,
+              color: Theme.of(context).colorScheme.surfaceVariant,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -2499,7 +2566,7 @@ class _ReportsTabState extends State<ReportsTab> {
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       decoration: BoxDecoration(
                         color: _reportType == ReportType.category
-                            ? Colors.white
+                            ? Theme.of(context).colorScheme.primaryContainer
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: _reportType == ReportType.category
@@ -2516,8 +2583,8 @@ class _ReportsTabState extends State<ReportsTab> {
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
                               color: _reportType == ReportType.category
-                                  ? Colors.black
-                                  : Colors.grey.shade600)),
+                                  ? Theme.of(context).colorScheme.onPrimaryContainer
+                                  : Theme.of(context).colorScheme.onSurfaceVariant)),
                     ),
                   ),
                 ),
@@ -2529,7 +2596,7 @@ class _ReportsTabState extends State<ReportsTab> {
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       decoration: BoxDecoration(
                         color: _reportType == ReportType.accountType
-                            ? Colors.white
+                            ? Theme.of(context).colorScheme.primaryContainer
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: _reportType == ReportType.accountType
@@ -2546,8 +2613,8 @@ class _ReportsTabState extends State<ReportsTab> {
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
                               color: _reportType == ReportType.accountType
-                                  ? Colors.black
-                                  : Colors.grey.shade600)),
+                                  ? Theme.of(context).colorScheme.onPrimaryContainer
+                                  : Theme.of(context).colorScheme.onSurfaceVariant)),
                     ),
                   ),
                 ),
@@ -2589,13 +2656,13 @@ class _ReportsTabState extends State<ReportsTab> {
                 style: GoogleFonts.inter(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: Colors.blueGrey.shade300,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     letterSpacing: 1)),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                  color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                  color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(20)),
               child: _isPieChart
                   ? _buildPieChart(sortedBreakdown, monthlyExpense)
                   : _buildBarList(sortedBreakdown, monthlyExpense),
@@ -2624,18 +2691,18 @@ class _ReportsTabState extends State<ReportsTab> {
                   child: Text(entry.key,
                       style: GoogleFonts.inter(
                           fontWeight: FontWeight.w600,
-                          color: Colors.blueGrey.shade800),
+                          color: Theme.of(context).colorScheme.onSurface),
                       overflow: TextOverflow.ellipsis),
                 ),
                 Text(FinanceCalculator.formatCurrency(entry.value),
                     style: GoogleFonts.inter(
                         fontWeight: FontWeight.bold,
-                        color: Colors.blueGrey.shade800))
+                        color: Theme.of(context).colorScheme.onSurface))
               ]),
               const SizedBox(height: 6),
               LinearProgressIndicator(
                   value: percentage,
-                  backgroundColor: Colors.blueGrey.shade50,
+                  backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
                   color: const Color(0xFF2563EB),
                   borderRadius: BorderRadius.circular(4),
                   minHeight: 6),
@@ -2657,6 +2724,7 @@ class _ReportsTabState extends State<ReportsTab> {
               data: data,
               total: total,
               colors: data.keys.map((_) => _getColor(colorIdx++)).toList(),
+              surfaceColor: Theme.of(context).colorScheme.surface,
             ),
             size: const Size(200, 200),
           ),
@@ -2694,9 +2762,13 @@ class PieChartPainter extends CustomPainter {
   final Map<String, double> data;
   final double total;
   final List<Color> colors;
+  final Color surfaceColor;
 
   PieChartPainter(
-      {required this.data, required this.total, required this.colors});
+      {required this.data,
+      required this.total,
+      required this.colors,
+      required this.surfaceColor});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2715,7 +2787,7 @@ class PieChartPainter extends CustomPainter {
       canvas.drawArc(rect, startAngle, sweepAngle, true, paint);
 
       final borderPaint = Paint()
-        ..color = Colors.white
+        ..color = surfaceColor
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2;
       canvas.drawArc(rect, startAngle, sweepAngle, true, borderPaint);
@@ -2724,7 +2796,7 @@ class PieChartPainter extends CustomPainter {
       i++;
     });
 
-    final holePaint = Paint()..color = Colors.white;
+    final holePaint = Paint()..color = surfaceColor;
     canvas.drawCircle(center, radius * 0.5, holePaint);
   }
 
@@ -2974,12 +3046,11 @@ class _CategoriesTabState extends State<CategoriesTab> {
     final sortedCategories = widget.categories.keys.toList()..sort();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
           title: Text('Categories',
               style: GoogleFonts.inter(
                   fontWeight: FontWeight.bold,
-                  color: Colors.blueGrey.shade800))),
+                  color: Theme.of(context).colorScheme.onSurface))),
       floatingActionButton: FloatingActionButton(
         onPressed: _addCategory,
         backgroundColor: const Color(0xFF2563EB),
@@ -2995,14 +3066,14 @@ class _CategoriesTabState extends State<CategoriesTab> {
             elevation: 0,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: Colors.blueGrey.shade100)),
+                side: BorderSide(color: Theme.of(context).dividerColor)),
             child: ExpansionTile(
               shape: const Border(),
               collapsedShape: const Border(),
               title: Text(cat,
                   style: GoogleFonts.inter(
                       fontWeight: FontWeight.w600,
-                      color: Colors.blueGrey.shade800)),
+                      color: Theme.of(context).colorScheme.onSurface)),
               trailing: IconButton(
                   icon: const Icon(Icons.edit, size: 18),
                   onPressed: () => _editCategory(cat)),
@@ -3019,15 +3090,15 @@ class _CategoriesTabState extends State<CategoriesTab> {
                       child: Chip(
                         label: Text(sub,
                             style: GoogleFonts.inter(fontSize: 14)),
-                        backgroundColor: Colors.blue.shade50,
+                        backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
                         side: BorderSide.none,
                       ),
                     )),
                     ActionChip(
                       label:
                       const Icon(Icons.add, size: 16, color: Colors.blue),
-                      backgroundColor: Colors.white,
-                      side: BorderSide(color: Colors.blue.shade200),
+                      backgroundColor: Theme.of(context).colorScheme.surface,
+                      side: BorderSide(color: Theme.of(context).colorScheme.primary.withOpacity(0.2)),
                       onPressed: () => _addSubCategory(cat),
                     )
                   ],
@@ -3231,7 +3302,7 @@ class TransactionItem extends StatelessWidget {
             width: 90, // Slightly increased for "From Account"
             child: Text(label,
                 style: GoogleFonts.inter(
-                    color: Colors.grey.shade600, fontSize: 13)),
+                    color: Colors.grey, fontSize: 13)),
           ),
           Expanded(
             child: Text(value,
@@ -3264,7 +3335,7 @@ class TransactionItem extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
         decoration: BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.circular(16)),
+            color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(16)),
         child: Row(
           children: [
             Container(
@@ -3294,7 +3365,7 @@ class TransactionItem extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.only(left: 6.0),
                           child:
-                          Icon(Icons.repeat, size: 14, color: Colors.grey),
+                          Icon(Icons.repeat, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                     ],
                   ),
@@ -3304,7 +3375,7 @@ class TransactionItem extends StatelessWidget {
                     children: [
                       Text(DateFormat('dd MMM').format(transaction.date),
                           style: GoogleFonts.inter(
-                              fontSize: 11, color: Colors.blueGrey.shade400)),
+                              fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       if (isTransfer && transaction.targetAccountId != null)
                         Text(
                             '• To: ${accounts.firstWhere((a) => a.id == transaction.targetAccountId, orElse: () => Account(id: -1, name: 'Unknown', balance: 0, type: AccountType.cash, createdDate: DateTime.now())).name}',
@@ -3465,9 +3536,9 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
     return Container(
       padding: EdgeInsets.fromLTRB(
           24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-      decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32))),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3477,7 +3548,7 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
+                      color: Theme.of(context).dividerColor,
                       borderRadius: BorderRadius.circular(24)))),
           const SizedBox(height: 24),
           Row(
@@ -3959,9 +4030,9 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     return Container(
       padding: EdgeInsets.fromLTRB(
           24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-      decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32))),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -3972,13 +4043,13 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
+                        color: Theme.of(context).dividerColor,
                         borderRadius: BorderRadius.circular(2)))),
             const SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: Theme.of(context).colorScheme.surfaceVariant,
                   borderRadius: BorderRadius.circular(12)),
               child: Row(
                 children: TransactionType.values.map((type) {
@@ -4004,7 +4075,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         decoration: BoxDecoration(
                             color:
-                            isSelected ? Colors.white : Colors.transparent,
+                            isSelected ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
                             borderRadius: BorderRadius.circular(10),
                             boxShadow: isSelected
                                 ? [
@@ -4020,8 +4091,8 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 fontWeight: FontWeight.w600,
                                 fontSize: 13,
                                 color: isSelected
-                                    ? Colors.black
-                                    : Colors.grey.shade600)),
+                                    ? Theme.of(context).colorScheme.onPrimaryContainer
+                                    : Theme.of(context).colorScheme.onSurfaceVariant)),
                       ),
                     ),
                   );
@@ -4034,17 +4105,17 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
               child: Container(
                   padding:
                   const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                  decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade200),
-                      borderRadius: BorderRadius.circular(12)),
+                   decoration: BoxDecoration(
+                       border: Border.all(color: Theme.of(context).dividerColor),
+                       borderRadius: BorderRadius.circular(12)),
                   child: Row(children: [
                     const Icon(Icons.calendar_today,
-                        size: 18, color: Colors.blueGrey),
+                        size: 18, color: Colors.blue),
                     const SizedBox(width: 8),
                     Text(DateFormat('dd MMM yyyy').format(_selectedDate),
                         style: GoogleFonts.inter(
                             fontWeight: FontWeight.w500,
-                            color: Colors.blueGrey.shade800)),
+                            color: Theme.of(context).colorScheme.onSurface)),
                     const Spacer(),
                     Text('Change',
                         style: GoogleFonts.inter(
@@ -4074,7 +4145,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 style: GoogleFonts.inter(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade400)),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
             DropdownButton<int>(
                 value: _selectedSourceId,
                 isExpanded: true,
@@ -4133,7 +4204,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                       selected: _selectedCategory == c,
                       onSelected: (val) =>
                           setState(() => _selectedCategory = c),
-                      selectedColor: Colors.green.shade100))
+                      selectedColor: Theme.of(context).colorScheme.primaryContainer,
+                      labelStyle: TextStyle(
+                          color: _selectedCategory == c 
+                              ? Theme.of(context).colorScheme.onPrimaryContainer 
+                              : Theme.of(context).colorScheme.onSurface)))
                       .toList()),
             ],
             if (_selectedType == TransactionType.expense) ...[
@@ -4265,7 +4340,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                     _selectedSubCategory = null;
                                   }
                                 }),
-                                selectedColor: Colors.blue.shade100)))
+                                selectedColor: Theme.of(context).colorScheme.primaryContainer,
+                                labelStyle: TextStyle(
+                                    color: _selectedCategory == c 
+                                        ? Theme.of(context).colorScheme.onPrimaryContainer 
+                                        : Theme.of(context).colorScheme.onSurface))))
                             .toList())),
                 if (_selectedSubCategory != null &&
                     _expenseCategories[_selectedCategory] != null) ...[
@@ -4285,7 +4364,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                           selected: _selectedSubCategory == sub,
                           onSelected: (val) =>
                               setState(() => _selectedSubCategory = sub),
-                          selectedColor: Colors.blue.shade100))
+                          selectedColor: Theme.of(context).colorScheme.primaryContainer,
+                          labelStyle: TextStyle(
+                              color: _selectedSubCategory == sub 
+                                  ? Theme.of(context).colorScheme.onPrimaryContainer 
+                                  : Theme.of(context).colorScheme.onSurface)))
                           .toList())
                 ],
               ],
