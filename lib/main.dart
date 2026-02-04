@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -393,33 +394,38 @@ class Transaction {
 class AuthService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: Platform.isIOS ? DefaultFirebaseOptions.ios.iosClientId : null,
+    clientId: kIsWeb 
+      ? '505413136406-r1tkrv2kotevtsl0vjgc6oqgfao19bvd.apps.googleusercontent.com' 
+      : (Platform.isIOS ? DefaultFirebaseOptions.ios.iosClientId : null),
   );
 
   static User? get currentUser => _auth.currentUser;
 
   static Future<User?> signInWithGoogle() async {
-    try {
-      await _googleSignIn.signOut(); // Force account picker
-
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null;
-
-      final GoogleSignInAuthentication googleAuth =
-      await googleUser.authentication;
-
-      final OAuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final UserCredential userCredential =
-      await _auth.signInWithCredential(credential);
+    if (kIsWeb) {
+      final GoogleAuthProvider googleProvider = GoogleAuthProvider();
+      googleProvider.setCustomParameters({'prompt': 'select_account'});
+      
+      final UserCredential userCredential = await _auth.signInWithPopup(googleProvider);
       return userCredential.user;
-    } catch (e) {
-      debugPrint("Error signing in with Google: $e");
-      return null;
     }
+
+    await _googleSignIn.signOut(); // Force account picker on mobile
+
+    final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+    if (googleUser == null) return null;
+
+    final GoogleSignInAuthentication googleAuth =
+    await googleUser.authentication;
+
+    final OAuthCredential credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+
+    final UserCredential userCredential =
+    await _auth.signInWithCredential(credential);
+    return userCredential.user;
   }
 
   static Future<void> signOut() async {
@@ -606,17 +612,34 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isLoading = true);
-    final user = await AuthService.signInWithGoogle();
+    try {
+      final user = await AuthService.signInWithGoogle();
 
-    if (user != null) {
-      await _migrateLocalData(user.uid);
+      if (user != null) {
+        await _migrateLocalData(user.uid);
+        setState(() => _isLoading = false);
+        if (mounted) _navigateToDashboard();
+      } else {
+        setState(() => _isLoading = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Sign in cancelled')));
+        }
+      }
+    } catch (e) {
       setState(() => _isLoading = false);
-      if (mounted) _navigateToDashboard();
-    } else {
-      setState(() => _isLoading = false);
+      debugPrint("Detailed error signing in with Google: $e");
       if (mounted) {
+        String message = e.toString();
+        if (message.contains('firebase_auth/admin-restricted-operation')) {
+          message = "This operation is restricted. Check Firebase Console.";
+        } else if (message.contains('firebase_auth/unauthorized-domain')) {
+          message = "Domain not authorized. Check Firebase Console > Auth > Settings.";
+        } else if (message.contains('popup-closed-by-user')) {
+          message = "Sign-in popup closed before completion.";
+        }
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sign in failed or cancelled')));
+            SnackBar(content: Text('Sign in failed: $message'), duration: const Duration(seconds: 10)));
       }
     }
   }

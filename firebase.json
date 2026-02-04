@@ -1,1 +1,45 @@
-{"hosting":{"public":"build/web","ignore":["firebase.json","**/.*","**/node_modules/**"],"rewrites":[{"source":"**","destination":"/index.html"}]},"flutter":{"platforms":{"android":{"default":{"projectId":"expense-tracker-6f119","appId":"1:505413136406:android:b04895b557f8217d5d8537","fileOutput":"android/app/google-services.json"}},"ios":{"default":{"projectId":"expense-tracker-6f119","appId":"1:505413136406:ios:563a51fcdc0759d35d8537","uploadDebugSymbols":false,"fileOutput":"ios/Runner/GoogleService-Info.plist"}},"dart":{"lib/firebase_options.dart":{"projectId":"expense-tracker-6f119","configurations":{"android":"1:505413136406:android:b04895b557f8217d5d8537","ios":"1:505413136406:ios:563a51fcdc0759d35d8537","web":"1:505413136406:web:b7920a164db5de635d8537"}}}}}}
+{
+    "flutter": {
+        "platforms": {
+            "android": {
+                "default": {
+                    "projectId": "expense-tracker-6f119",
+                    "appId": "1:505413136406:android:7ddfb024eb3f37815d8537",
+                    "fileOutput": "android/app/google-services.json"
+                }
+            },
+            "ios": {
+                "default": {
+                    "projectId": "expense-tracker-6f119",
+                    "appId": "1:505413136406:ios:35194c1e6eb68f7f5d8537",
+                    "uploadDebugSymbols": false,
+                    "fileOutput": "ios/Runner/GoogleService-Info.plist"
+                }
+            },
+            "dart": {
+                "lib/firebase_options.dart": {
+                    "projectId": "expense-tracker-6f119",
+                    "configurations": {
+                        "android": "1:505413136406:android:7ddfb024eb3f37815d8537",
+                        "ios": "1:505413136406:ios:35194c1e6eb68f7f5d8537",
+                        "web": "1:505413136406:web:b7920a164db5de635d8537"
+                    }
+                }
+            }
+        }
+    },
+    "hosting": {
+        "public": "build/web",
+        "ignore": [
+            "firebase.json",
+            "**/.*",
+            "**/node_modules/**"
+        ],
+        "rewrites": [
+            {
+                "source": "**",
+                "destination": "/index.html"
+            }
+        ]
+    }
+}
