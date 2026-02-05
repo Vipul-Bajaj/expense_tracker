@@ -4,20 +4,20 @@ import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:encrypt/encrypt.dart' as enc;
+import 'package:expense_tracker/biometric_service.dart';
+import 'package:expense_tracker/currency_service.dart';
+import 'package:expense_tracker/firebase_options.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:expense_tracker/biometric_service.dart';
-import 'package:expense_tracker/currency_service.dart';
-import 'package:expense_tracker/firebase_options.dart';
 
 // --- ENCRYPTION SERVICE ---
 
@@ -93,9 +93,10 @@ class FinanceCalculator {
         if (t.type == TransactionType.expense) {
           if (t.splits != null && t.splits!.isNotEmpty) {
             for (var split in t.splits!) {
-              String key = split.subCategory != null && split.subCategory!.isNotEmpty
-                  ? "${split.category} - ${split.subCategory}"
-                  : split.category;
+              String key =
+                  split.subCategory != null && split.subCategory!.isNotEmpty
+                      ? "${split.category} - ${split.subCategory}"
+                      : split.category;
               breakdown[key] = (breakdown[key] ?? 0) + split.amount;
             }
           } else {
@@ -105,7 +106,8 @@ class FinanceCalculator {
             breakdown[key] = (breakdown[key] ?? 0) + t.amount;
           }
         } else if (t.type == TransactionType.transfer && t.fee > 0) {
-          breakdown['Transfer Fees'] = (breakdown['Transfer Fees'] ?? 0) + t.fee;
+          breakdown['Transfer Fees'] =
+              (breakdown['Transfer Fees'] ?? 0) + t.fee;
         }
       } else {
         if (t.type == TransactionType.expense ||
@@ -118,9 +120,11 @@ class FinanceCalculator {
                   type: AccountType.cash,
                   createdDate: DateTime.now()));
 
-          String key = account.type.name[0].toUpperCase() + account.type.name.substring(1);
+          String key = account.type.name[0].toUpperCase() +
+              account.type.name.substring(1);
 
-          double amountToAdd = t.type == TransactionType.expense ? t.amount : t.fee;
+          double amountToAdd =
+              t.type == TransactionType.expense ? t.amount : t.fee;
           breakdown[key] = (breakdown[key] ?? 0) + amountToAdd;
         }
       }
@@ -128,7 +132,8 @@ class FinanceCalculator {
     return breakdown;
   }
 
-  static List<MonthlyData> calculateMonthlyComparison(List<Transaction> transactions) {
+  static List<MonthlyData> calculateMonthlyComparison(
+      List<Transaction> transactions) {
     final Map<String, MonthlyData> monthlyMap = {};
     final now = DateTime.now();
 
@@ -158,8 +163,8 @@ class FinanceCalculator {
   static Currency _getCurrencyConfig() {
     final box = Hive.box('settings');
     final currencyName = box.get('currency', defaultValue: 'inr');
-    return Currency.values.firstWhere((c) => c.name == currencyName,
-        orElse: () => Currency.inr);
+    return Currency.values
+        .firstWhere((c) => c.name == currencyName, orElse: () => Currency.inr);
   }
 
   static double _getEffectiveRate(Currency currency) {
@@ -202,7 +207,8 @@ class MonthlyData {
   double income;
   double expense;
 
-  MonthlyData({required this.month, required this.income, required this.expense});
+  MonthlyData(
+      {required this.month, required this.income, required this.expense});
 }
 
 // --- 1. Data Models & Adapters ---
@@ -223,7 +229,8 @@ enum Currency {
   final String label;
   final double rate; // Rate relative to INR (base)
 
-  const Currency({required this.symbol, required this.label, required this.rate});
+  const Currency(
+      {required this.symbol, required this.label, required this.rate});
 }
 
 class Account {
@@ -301,7 +308,7 @@ class TransactionSplit {
       'amount': EncryptionService.encryptDouble(amount),
       'category': EncryptionService.encrypt(category),
       'subCategory':
-      subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
+          subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
     };
   }
 
@@ -355,7 +362,7 @@ class Transaction {
       'targetAccountId': targetAccountId,
       'category': EncryptionService.encrypt(category),
       'subCategory':
-      subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
+          subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
       'date': Timestamp.fromDate(date),
       'splits': splits?.map((s) => s.toMap()).toList(),
       'note': note != null ? EncryptionService.encrypt(note!) : null,
@@ -378,8 +385,8 @@ class Transaction {
       date: (map['date'] as Timestamp).toDate(),
       splits: map['splits'] != null
           ? (map['splits'] as List)
-          .map((s) => TransactionSplit.fromMap(s))
-          .toList()
+              .map((s) => TransactionSplit.fromMap(s))
+              .toList()
           : null,
       note: map['note'] != null ? EncryptionService.decrypt(map['note']) : null,
       recurrence: map['recurrence'] != null
@@ -394,9 +401,9 @@ class Transaction {
 class AuthService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: kIsWeb 
-      ? '505413136406-r1tkrv2kotevtsl0vjgc6oqgfao19bvd.apps.googleusercontent.com' 
-      : (Platform.isIOS ? DefaultFirebaseOptions.ios.iosClientId : null),
+    clientId: kIsWeb
+        ? '505413136406-r1tkrv2kotevtsl0vjgc6oqgfao19bvd.apps.googleusercontent.com'
+        : (Platform.isIOS ? DefaultFirebaseOptions.ios.iosClientId : null),
   );
 
   static User? get currentUser => _auth.currentUser;
@@ -405,8 +412,9 @@ class AuthService {
     if (kIsWeb) {
       final GoogleAuthProvider googleProvider = GoogleAuthProvider();
       googleProvider.setCustomParameters({'prompt': 'select_account'});
-      
-      final UserCredential userCredential = await _auth.signInWithPopup(googleProvider);
+
+      final UserCredential userCredential =
+          await _auth.signInWithPopup(googleProvider);
       return userCredential.user;
     }
 
@@ -416,7 +424,7 @@ class AuthService {
     if (googleUser == null) return null;
 
     final GoogleSignInAuthentication googleAuth =
-    await googleUser.authentication;
+        await googleUser.authentication;
 
     final OAuthCredential credential = GoogleAuthProvider.credential(
       accessToken: googleAuth.accessToken,
@@ -424,7 +432,7 @@ class AuthService {
     );
 
     final UserCredential userCredential =
-    await _auth.signInWithCredential(credential);
+        await _auth.signInWithCredential(credential);
     return userCredential.user;
   }
 
@@ -536,8 +544,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     });
   }
 
-
-
   Future<void> _checkAutoLogin() async {
     final user = AuthService.currentUser;
     if (user != null) {
@@ -548,7 +554,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
       // Check for Biometric Lock
       final box = Hive.box('settings');
-      final bool isBiometricEnabled = box.get('isBiometricEnabled', defaultValue: false);
+      final bool isBiometricEnabled =
+          box.get('isBiometricEnabled', defaultValue: false);
 
       if (isBiometricEnabled) {
         final bool authenticated = await BiometricAuthService.authenticate();
@@ -556,12 +563,13 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           // If failed or cancelled, stay on welcome screen or show error.
           // For security, checking again or just doing nothing (preventing access) is safest.
           if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Authentication failed. Please try again.")),
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text("Authentication failed. Please try again.")),
             );
-             // Re-attempting or showing a specific button to retry would be better UX, 
-             // but for now we just stop the flow.
-             return;
+            // Re-attempting or showing a specific button to retry would be better UX,
+            // but for now we just stop the flow.
+            return;
           }
         }
       }
@@ -652,8 +660,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       } else {
         setState(() => _isLoading = false);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Sign in cancelled')));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Sign in cancelled')));
         }
       }
     } catch (e) {
@@ -664,12 +672,14 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         if (message.contains('firebase_auth/admin-restricted-operation')) {
           message = "This operation is restricted. Check Firebase Console.";
         } else if (message.contains('firebase_auth/unauthorized-domain')) {
-          message = "Domain not authorized. Check Firebase Console > Auth > Settings.";
+          message =
+              "Domain not authorized. Check Firebase Console > Auth > Settings.";
         } else if (message.contains('popup-closed-by-user')) {
           message = "Sign-in popup closed before completion.";
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Sign in failed: $message'), duration: const Duration(seconds: 10)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Sign in failed: $message'),
+            duration: const Duration(seconds: 10)));
       }
     }
   }
@@ -694,11 +704,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer, shape: BoxShape.circle),
-                  child: Icon(Icons.wallet, size: 64, color: Theme.of(context).colorScheme.primary),
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      shape: BoxShape.circle),
+                  child: Icon(Icons.wallet,
+                      size: 64, color: Theme.of(context).colorScheme.primary),
                 ),
                 const SizedBox(height: 40),
-
                 Text(
                   'Expense Tracker',
                   style: GoogleFonts.inter(
@@ -708,7 +719,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
-
                 if (showLoginOptions)
                   Text(
                     'Control Your Money',
@@ -718,22 +728,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         color: Theme.of(context).colorScheme.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
-
                 if (!showLoginOptions) ...[
                   const SizedBox(height: 8),
                   Text(
                     'Loading your finances...',
                     style: GoogleFonts.inter(
                         fontSize: 16,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant
-                    ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: 32),
                   const CircularProgressIndicator(),
                 ],
-
                 const Spacer(),
-
                 if (showLoginOptions) ...[
                   Text(
                     'Track expenses, income, manage accounts, and analyze your financial health.',
@@ -757,9 +763,12 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                             style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant)),
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: Theme.of(context).dividerColor),
+                          side:
+                              BorderSide(color: Theme.of(context).dividerColor),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16)),
                         ),
@@ -789,8 +798,8 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
   int _currentIndex = 0;
   bool _recurrenceChecked = false;
 
-  void _checkRecurringTransactions(
-      List<Transaction> transactions, List<Account> accounts, String userId) async {
+  void _checkRecurringTransactions(List<Transaction> transactions,
+      List<Account> accounts, String userId) async {
     // ... existing recurring logic ...
     if (_recurrenceChecked) return;
     _recurrenceChecked = true;
@@ -821,7 +830,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
             nextDueDate = nextDueDate.add(const Duration(days: 7));
             break;
           case RecurrenceFrequency.monthly:
-          // Handle month overflow carefully
+            // Handle month overflow carefully
             int newMonth = nextDueDate.month + 1;
             int newYear = nextDueDate.year;
             if (newMonth > 12) {
@@ -834,13 +843,16 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
             nextDueDate = DateTime(newYear, newMonth, newDay);
             break;
           case RecurrenceFrequency.yearly:
-          // Handle leap years
+            // Handle leap years
             if (txn.date.month == 2 && txn.date.day == 29) {
               // Check if next year is leap year, if not use 28th
-              final isLeap = (nextDueDate.year + 1) % 4 == 0 && ((nextDueDate.year + 1) % 100 != 0 || (nextDueDate.year + 1) % 400 == 0);
+              final isLeap = (nextDueDate.year + 1) % 4 == 0 &&
+                  ((nextDueDate.year + 1) % 100 != 0 ||
+                      (nextDueDate.year + 1) % 400 == 0);
               nextDueDate = DateTime(nextDueDate.year + 1, 2, isLeap ? 29 : 28);
             } else {
-              nextDueDate = DateTime(nextDueDate.year + 1, nextDueDate.month, nextDueDate.day);
+              nextDueDate = DateTime(
+                  nextDueDate.year + 1, nextDueDate.month, nextDueDate.day);
             }
             break;
           case RecurrenceFrequency.none:
@@ -853,7 +865,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
         // Check if a transaction already exists for this recurrence on this specific date
         // Logic: Same Category, Amount, Type, and Date (Year, Month, Day)
         bool exists = transactions.any((t) =>
-        t.amount == txn.amount &&
+            t.amount == txn.amount &&
             t.category == txn.category &&
             t.type == txn.type &&
             t.date.year == nextDueDate.year &&
@@ -874,10 +886,12 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
             targetAccountId: txn.targetAccountId,
             category: txn.category,
             subCategory: txn.subCategory,
-            date: nextDueDate, // The due date
+            date: nextDueDate,
+            // The due date
             splits: txn.splits,
             note: "${txn.note ?? ''} (Recurring)",
-            recurrence: RecurrenceFrequency.none, // New instance is not the parent
+            recurrence:
+                RecurrenceFrequency.none, // New instance is not the parent
           );
 
           // Add to batch
@@ -903,16 +917,28 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
             // Update local object to reflect in next loop iteration if multiple recurring hit same account
             sourceAcc.balance = newBalance;
 
-            final accRef = firestore.collection('users').doc(userId).collection('accounts').doc(sourceAcc.id.toString());
-            batch.update(accRef, {'balance': EncryptionService.encryptDouble(newBalance)});
+            final accRef = firestore
+                .collection('users')
+                .doc(userId)
+                .collection('accounts')
+                .doc(sourceAcc.id.toString());
+            batch.update(accRef,
+                {'balance': EncryptionService.encryptDouble(newBalance)});
           }
 
-          if (txn.type == TransactionType.transfer && txn.targetAccountId != null) {
+          if (txn.type == TransactionType.transfer &&
+              txn.targetAccountId != null) {
             final targetAcc = accountMap[txn.targetAccountId];
             if (targetAcc != null) {
               targetAcc.balance += txn.amount;
-              final targetRef = firestore.collection('users').doc(userId).collection('accounts').doc(targetAcc.id.toString());
-              batch.update(targetRef, {'balance': EncryptionService.encryptDouble(targetAcc.balance)});
+              final targetRef = firestore
+                  .collection('users')
+                  .doc(userId)
+                  .collection('accounts')
+                  .doc(targetAcc.id.toString());
+              batch.update(targetRef, {
+                'balance': EncryptionService.encryptDouble(targetAcc.balance)
+              });
             }
           }
         }
@@ -923,7 +949,8 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
       await batch.commit();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Recurring transactions generated automatically.")),
+          const SnackBar(
+              content: Text("Recurring transactions generated automatically.")),
         );
       }
     }
@@ -937,22 +964,22 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
       Future.microtask(() {
         Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-                (route) => false);
+            (route) => false);
       });
       return const SizedBox();
     }
 
     final userDocRef =
-    FirebaseFirestore.instance.collection('users').doc(user.uid);
+        FirebaseFirestore.instance.collection('users').doc(user.uid);
 
     return StreamBuilder<QuerySnapshot>(
       stream: userDocRef.collection('accounts').snapshots(),
       builder: (context, accountsSnapshot) {
         final List<Account> accounts = accountsSnapshot.hasData
             ? accountsSnapshot.data!.docs
-            .map((doc) =>
-            Account.fromMap(doc.data() as Map<String, dynamic>))
-            .toList()
+                .map((doc) =>
+                    Account.fromMap(doc.data() as Map<String, dynamic>))
+                .toList()
             : [];
 
         return StreamBuilder<QuerySnapshot>(
@@ -960,14 +987,17 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
           builder: (context, transactionsSnapshot) {
             final List<Transaction> transactions = transactionsSnapshot.hasData
                 ? transactionsSnapshot.data!.docs
-                .map((doc) =>
-                Transaction.fromMap(doc.data() as Map<String, dynamic>))
-                .toList()
+                    .map((doc) =>
+                        Transaction.fromMap(doc.data() as Map<String, dynamic>))
+                    .toList()
                 : [];
 
             // Check for recurring transactions once data is loaded
-            if (transactions.isNotEmpty && accounts.isNotEmpty && !_recurrenceChecked) {
-              Future.microtask(() => _checkRecurringTransactions(transactions, accounts, user.uid));
+            if (transactions.isNotEmpty &&
+                accounts.isNotEmpty &&
+                !_recurrenceChecked) {
+              Future.microtask(() => _checkRecurringTransactions(
+                  transactions, accounts, user.uid));
             }
 
             return StreamBuilder<DocumentSnapshot>(
@@ -1000,13 +1030,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                     'Course',
                     'Workshop'
                   ],
-                  'Investment': [
-                    'Mutual Funds',
-                    'Stocks',
-                    'FD',
-                    'Gold',
-                    'SIP'
-                  ],
+                  'Investment': ['Mutual Funds', 'Stocks', 'FD', 'Gold', 'SIP'],
                   'Health': ['Medicine', 'Doctor', 'Insurance'],
                   'Entmt': ['Movies', 'Games', 'Events', 'Date'],
                 };
@@ -1015,7 +1039,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                     categoriesSnapshot.data != null &&
                     categoriesSnapshot.data!.exists) {
                   final data =
-                  categoriesSnapshot.data!.data() as Map<String, dynamic>;
+                      categoriesSnapshot.data!.data() as Map<String, dynamic>;
                   if (data.containsKey('data')) {
                     categories = (data['data'] as Map).map((k, v) => MapEntry(
                         k.toString(),
@@ -1027,13 +1051,17 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                   valueListenable: Hive.box('settings').listenable(),
                   builder: (context, box, _) {
                     final List<Widget> pages = [
-                      DashboardTab(accounts: accounts, transactions: transactions),
+                      DashboardTab(
+                          accounts: accounts, transactions: transactions),
                       TransactionsTab(
                           transactions: transactions,
                           accounts: accounts,
                           categories: categories),
-                      AccountsTab(accounts: accounts, transactions: transactions), // Passed transactions
-                      ReportsTab(accounts: accounts, transactions: transactions),
+                      AccountsTab(
+                          accounts: accounts, transactions: transactions),
+                      // Passed transactions
+                      ReportsTab(
+                          accounts: accounts, transactions: transactions),
                       CategoriesTab(categories: categories),
                     ];
 
@@ -1042,8 +1070,10 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                       bottomNavigationBar: BottomNavigationBar(
                         currentIndex: _currentIndex,
                         onTap: (idx) => setState(() => _currentIndex = idx),
-                        selectedItemColor: Theme.of(context).colorScheme.primary,
-                        unselectedItemColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                        selectedItemColor:
+                            Theme.of(context).colorScheme.primary,
+                        unselectedItemColor:
+                            Theme.of(context).colorScheme.onSurfaceVariant,
                         showUnselectedLabels: true,
                         type: BottomNavigationBarType.fixed,
                         items: const [
@@ -1071,26 +1101,26 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                       ),
                       floatingActionButton: _currentIndex == 0
                           ? FloatingActionButton(
-                        onPressed: () {
-                          if (accounts.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        'Please add an account first (Accounts Tab)!'),
-                                    backgroundColor: Colors.red));
-                            return;
-                          }
-                          showModalBottomSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            backgroundColor: Colors.transparent,
-                            builder: (_) =>
-                                AddTransactionSheet(accounts: accounts),
-                          );
-                        },
-                        backgroundColor: const Color(0xFF2563EB),
-                        child: const Icon(Icons.add, color: Colors.white),
-                      )
+                              onPressed: () {
+                                if (accounts.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content: Text(
+                                              'Please add an account first (Accounts Tab)!'),
+                                          backgroundColor: Colors.red));
+                                  return;
+                                }
+                                showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  backgroundColor: Colors.transparent,
+                                  builder: (_) =>
+                                      AddTransactionSheet(accounts: accounts),
+                                );
+                              },
+                              backgroundColor: const Color(0xFF2563EB),
+                              child: const Icon(Icons.add, color: Colors.white),
+                            )
                           : null,
                     );
                   },
@@ -1121,7 +1151,6 @@ class _DashboardTabState extends State<DashboardTab> {
   DateTime _currentMonth = DateTime.now();
   final User? _user = AuthService.currentUser;
 
-
   void _changeMonth(int offset) {
     setState(() {
       _currentMonth =
@@ -1134,7 +1163,7 @@ class _DashboardTabState extends State<DashboardTab> {
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-            (route) => false,
+        (route) => false,
       );
     }
   }
@@ -1150,7 +1179,7 @@ class _DashboardTabState extends State<DashboardTab> {
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-            (route) => false,
+        (route) => false,
       );
     }
   }
@@ -1168,63 +1197,70 @@ class _DashboardTabState extends State<DashboardTab> {
           padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
           child: SingleChildScrollView(
             child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 24),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).dividerColor,
-                  borderRadius: BorderRadius.circular(2),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 24),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).dividerColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              if (_user != null) ...[
-                CircleAvatar(
-                  radius: 36,
-                  backgroundColor: Colors.blue.shade50,
-                  backgroundImage: _user!.photoURL != null
-                      ? NetworkImage(_user!.photoURL!)
-                      : null,
-                  child: _user!.photoURL == null
-                      ? Text(_user!.displayName?[0] ?? "U",
-                      style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blue.shade700))
-                      : null,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _user!.displayName ?? 'User',
-                  style: GoogleFonts.inter(
-                      fontSize: 20, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface),
-                ),
-                Text(
-                  _user!.email ?? '',
-                  style: GoogleFonts.inter(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
-                ),
-                const SizedBox(height: 24),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-              ],
+                if (_user != null) ...[
+                  CircleAvatar(
+                    radius: 36,
+                    backgroundColor: Colors.blue.shade50,
+                    backgroundImage: _user!.photoURL != null
+                        ? NetworkImage(_user!.photoURL!)
+                        : null,
+                    child: _user!.photoURL == null
+                        ? Text(_user!.displayName?[0] ?? "U",
+                            style: GoogleFonts.inter(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue.shade700))
+                        : null,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _user!.displayName ?? 'User',
+                    style: GoogleFonts.inter(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface),
+                  ),
+                  Text(
+                    _user!.email ?? '',
+                    style: GoogleFonts.inter(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 14),
+                  ),
+                  const SizedBox(height: 24),
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+                ],
 
-
-
-              // Biometric Toggle
-              StatefulBuilder(
-                builder: (context, setSheetState) {
+                // Biometric Toggle
+                StatefulBuilder(builder: (context, setSheetState) {
                   final box = Hive.box('settings');
-                  bool isEnabled = box.get('isBiometricEnabled', defaultValue: false);
+                  bool isEnabled =
+                      box.get('isBiometricEnabled', defaultValue: false);
                   return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                          color: isEnabled ? Colors.green.shade50 : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(8)
-                      ),
-                      child: Icon(
-                          Icons.fingerprint,
-                          color: isEnabled ? Colors.green.shade600 : Colors.grey.shade600
-                      ),
+                          color: isEnabled
+                              ? Colors.green.shade50
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8)),
+                      child: Icon(Icons.fingerprint,
+                          color: isEnabled
+                              ? Colors.green.shade600
+                              : Colors.grey.shade600),
                     ),
                     title: Text('Biometric Lock',
                         style: GoogleFonts.inter(
@@ -1232,24 +1268,31 @@ class _DashboardTabState extends State<DashboardTab> {
                             fontWeight: FontWeight.w600,
                             color: Colors.blueGrey.shade800)),
                     subtitle: Text(
-                        isEnabled ? 'App is locked on startup' : 'Enable to protect your data',
-                        style: GoogleFonts.inter(fontSize: 12, color: Colors.blueGrey.shade400)),
+                        isEnabled
+                            ? 'App is locked on startup'
+                            : 'Enable to protect your data',
+                        style: GoogleFonts.inter(
+                            fontSize: 12, color: Colors.blueGrey.shade400)),
                     trailing: Switch(
                       value: isEnabled,
                       activeColor: const Color(0xFF2563EB),
                       onChanged: (val) async {
                         if (val) {
                           // Verify biometrics before enabling
-                          bool canCheck = await BiometricAuthService.canCheckBiometrics();
+                          bool canCheck =
+                              await BiometricAuthService.canCheckBiometrics();
                           if (!canCheck) {
                             if (context.mounted) {
-                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text("Biometrics not available on this device")),
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        "Biometrics not available on this device")),
                               );
                             }
                             return;
                           }
-                          bool authenticated = await BiometricAuthService.authenticate();
+                          bool authenticated =
+                              await BiometricAuthService.authenticate();
                           if (authenticated) {
                             await box.put('isBiometricEnabled', true);
                             setSheetState(() {});
@@ -1261,27 +1304,24 @@ class _DashboardTabState extends State<DashboardTab> {
                       },
                     ),
                   );
-                }
-              ),
-              const SizedBox(height: 8),
+                }),
+                const SizedBox(height: 8),
 
-              StatefulBuilder(
-                builder: (context, setSheetState) {
+                StatefulBuilder(builder: (context, setSheetState) {
                   final box = Hive.box('settings');
-                  String currentCurrency = box.get('currency', defaultValue: 'inr');
+                  String currentCurrency =
+                      box.get('currency', defaultValue: 'inr');
 
                   final currencyListTile = ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                           color: Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(8)
-                      ),
-                      child: Icon(
-                          Icons.payments_outlined,
-                          color: Colors.orange.shade600
-                      ),
+                          borderRadius: BorderRadius.circular(8)),
+                      child: Icon(Icons.payments_outlined,
+                          color: Colors.orange.shade600),
                     ),
                     title: Text('Reference Currency',
                         style: GoogleFonts.inter(
@@ -1290,7 +1330,11 @@ class _DashboardTabState extends State<DashboardTab> {
                             color: Theme.of(context).colorScheme.onSurface)),
                     subtitle: Text(
                         'Display amounts in ${currentCurrency.toUpperCase()}',
-                        style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
                     trailing: DropdownButton<String>(
                       value: currentCurrency,
                       underline: const SizedBox(),
@@ -1309,20 +1353,24 @@ class _DashboardTabState extends State<DashboardTab> {
                     ),
                   );
 
-                  String currentThemeMode = box.get('themeMode', defaultValue: 'system');
+                  String currentThemeMode =
+                      box.get('themeMode', defaultValue: 'system');
 
                   final themeListTile = ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                           color: Colors.purple.shade50,
-                          borderRadius: BorderRadius.circular(8)
-                      ),
+                          borderRadius: BorderRadius.circular(8)),
                       child: Icon(
-                          currentThemeMode == 'dark' ? Icons.dark_mode_outlined : (currentThemeMode == 'light' ? Icons.light_mode_outlined : Icons.brightness_auto_outlined),
-                          color: Colors.purple.shade600
-                      ),
+                          currentThemeMode == 'dark'
+                              ? Icons.dark_mode_outlined
+                              : (currentThemeMode == 'light'
+                                  ? Icons.light_mode_outlined
+                                  : Icons.brightness_auto_outlined),
+                          color: Colors.purple.shade600),
                     ),
                     title: Text('App Theme',
                         style: GoogleFonts.inter(
@@ -1331,7 +1379,11 @@ class _DashboardTabState extends State<DashboardTab> {
                             color: Theme.of(context).colorScheme.onSurface)),
                     subtitle: Text(
                         'Current: ${currentThemeMode[0].toUpperCase()}${currentThemeMode.substring(1)}',
-                        style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
                     trailing: DropdownButton<String>(
                       value: currentThemeMode,
                       underline: const SizedBox(),
@@ -1355,26 +1407,28 @@ class _DashboardTabState extends State<DashboardTab> {
                       currencyListTile,
                       themeListTile,
                       ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 4),
                         leading: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
                               color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(8)
-                          ),
-                          child: Icon(
-                              Icons.sync,
-                              color: Colors.blue.shade600
-                          ),
+                              borderRadius: BorderRadius.circular(8)),
+                          child: Icon(Icons.sync, color: Colors.blue.shade600),
                         ),
                         title: Text('Update Rates',
                             style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurface)),
+                                color:
+                                    Theme.of(context).colorScheme.onSurface)),
                         subtitle: Text(
                             'Last updated: ${CurrencyService.getLastUpdatedText()}',
-                            style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                            style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant)),
                         trailing: IconButton(
                           icon: const Icon(Icons.refresh),
                           onPressed: () async {
@@ -1383,13 +1437,16 @@ class _DashboardTabState extends State<DashboardTab> {
                               setSheetState(() {});
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Rates updated successfully')),
+                                  const SnackBar(
+                                      content:
+                                          Text('Rates updated successfully')),
                                 );
                               }
                             } else {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Failed to update rates')),
+                                  const SnackBar(
+                                      content: Text('Failed to update rates')),
                                 );
                               }
                             }
@@ -1398,65 +1455,71 @@ class _DashboardTabState extends State<DashboardTab> {
                       ),
                     ],
                   );
-                }
-              ),
-              const SizedBox(height: 8),
+                }),
+                const SizedBox(height: 8),
 
-              // Enhanced Switch Account Option
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(8)
+                // Enhanced Switch Account Option
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.switch_account_outlined,
+                        color: Color(0xFF2563EB)),
                   ),
-                  child: const Icon(Icons.switch_account_outlined, color: Color(0xFF2563EB)),
+                  title: Text('Switch Account',
+                      style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface)),
+                  subtitle: Text('Login with a different email',
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _switchAccount(context);
+                  },
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
-                title: Text('Switch Account',
-                    style: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface)),
-                subtitle: Text('Login with a different email',
-                    style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _switchAccount(context);
-                },
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
 
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
 
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(8)
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Icon(Icons.logout, color: Colors.red.shade600),
                   ),
-                  child: Icon(Icons.logout, color: Colors.red.shade600),
+                  title: Text('Sign Out',
+                      style: GoogleFonts.inter(
+                          fontSize: 16,
+                          color: Colors.red.shade700,
+                          fontWeight: FontWeight.w600)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _signOut(context);
+                  },
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
-                title: Text('Sign Out',
-                    style: GoogleFonts.inter(
-                        fontSize: 16,
-                        color: Colors.red.shade700, fontWeight: FontWeight.w600)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _signOut(context);
-                },
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              const SizedBox(height: 16),
-            ],
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
-        ),
-      );
-    },
-  );
-}
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1466,8 +1529,10 @@ class _DashboardTabState extends State<DashboardTab> {
     }).toList();
     monthlyTransactions.sort((a, b) => b.date.compareTo(a.date));
 
-    final double monthlyIncome = FinanceCalculator.calculateIncome(monthlyTransactions);
-    final double monthlyExpense = FinanceCalculator.calculateExpense(monthlyTransactions);
+    final double monthlyIncome =
+        FinanceCalculator.calculateIncome(monthlyTransactions);
+    final double monthlyExpense =
+        FinanceCalculator.calculateExpense(monthlyTransactions);
 
     final double monthlyTotal = monthlyIncome - monthlyExpense;
 
@@ -1475,7 +1540,8 @@ class _DashboardTabState extends State<DashboardTab> {
       appBar: AppBar(
         title: Text('Dashboard',
             style: GoogleFonts.inter(
-                fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface)),
         actions: [
           if (_user != null) ...[
             GestureDetector(
@@ -1493,7 +1559,8 @@ class _DashboardTabState extends State<DashboardTab> {
                       ? NetworkImage(_user!.photoURL!)
                       : null,
                   child: _user!.photoURL == null
-                      ? Icon(Icons.person, size: 20, color: Colors.blue.shade700)
+                      ? Icon(Icons.person,
+                          size: 20, color: Colors.blue.shade700)
                       : null,
                 ),
               ),
@@ -1541,7 +1608,8 @@ class _DashboardTabState extends State<DashboardTab> {
                 const SizedBox(height: 16),
                 Text('Total Balance',
                     style: GoogleFonts.inter(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14)),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 14)),
                 const SizedBox(height: 4),
                 Text(FinanceCalculator.formatCurrency(monthlyTotal),
                     style: GoogleFonts.inter(
@@ -1564,7 +1632,9 @@ class _DashboardTabState extends State<DashboardTab> {
                             Text('Income',
                                 style: GoogleFonts.inter(
                                     fontSize: 12,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant)),
                           ],
                         ),
                         Text(FinanceCalculator.formatCurrency(monthlyIncome),
@@ -1575,7 +1645,9 @@ class _DashboardTabState extends State<DashboardTab> {
                       ],
                     ),
                     Container(
-                        height: 30, width: 1, color: Theme.of(context).dividerColor),
+                        height: 30,
+                        width: 1,
+                        color: Theme.of(context).dividerColor),
                     Column(
                       children: [
                         Row(
@@ -1586,7 +1658,9 @@ class _DashboardTabState extends State<DashboardTab> {
                             Text('Expense',
                                 style: GoogleFonts.inter(
                                     fontSize: 12,
-                                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant)),
                           ],
                         ),
                         Text(FinanceCalculator.formatCurrency(monthlyExpense),
@@ -1615,7 +1689,9 @@ class _DashboardTabState extends State<DashboardTab> {
                     padding: const EdgeInsets.all(20),
                     child: Text('No transactions in this month',
                         style: GoogleFonts.inter(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant))))
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant))))
           else
             ...monthlyTransactions.take(10).map((txn) =>
                 TransactionItem(transaction: txn, accounts: widget.accounts)),
@@ -1693,7 +1769,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
         if (_selectedCategory != null &&
             widget.categories[_selectedCategory] != null) {
           sortedSubCategories =
-          List<String>.from(widget.categories[_selectedCategory]!)..sort();
+              List<String>.from(widget.categories[_selectedCategory]!)..sort();
         }
 
         return Container(
@@ -1736,14 +1812,14 @@ class _TransactionsTabState extends State<TransactionsTab> {
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 items: [
                   const DropdownMenuItem(value: null, child: Text("All Types")),
                   ...TransactionType.values.map((t) => DropdownMenuItem(
                       value: t,
-                      child: Text(
-                          t.name[0].toUpperCase() + t.name.substring(1)))),
+                      child:
+                          Text(t.name[0].toUpperCase() + t.name.substring(1)))),
                 ],
                 onChanged: (val) {
                   setModalState(() => _selectedType = val);
@@ -1758,7 +1834,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 items: [
                   const DropdownMenuItem(
@@ -1779,7 +1855,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 isExpanded: true,
                 items: [
@@ -1814,8 +1890,8 @@ class _TransactionsTabState extends State<TransactionsTab> {
                   items: [
                     const DropdownMenuItem(
                         value: null, child: Text("All Sub-Categories")),
-                    ...sortedSubCategories.map(
-                            (s) => DropdownMenuItem(value: s, child: Text(s))),
+                    ...sortedSubCategories
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s))),
                   ],
                   onChanged: (val) {
                     setModalState(() => _selectedSubCategory = val);
@@ -1886,7 +1962,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
 
       if (t.splits != null && t.splits!.isNotEmpty) {
         return t.splits!.any((s) =>
-        s.category == _selectedCategory &&
+            s.category == _selectedCategory &&
             (_selectedSubCategory == null ||
                 s.subCategory == _selectedSubCategory));
       }
@@ -1905,18 +1981,18 @@ class _TransactionsTabState extends State<TransactionsTab> {
       appBar: AppBar(
         title: _isSearchVisible
             ? TextField(
-          controller: _searchCtrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: "Search transactions...",
-            border: InputBorder.none,
-          ),
-          onChanged: (val) => setState(() {}),
-        )
+                controller: _searchCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: "Search transactions...",
+                  border: InputBorder.none,
+                ),
+                onChanged: (val) => setState(() {}),
+              )
             : Text("Transactions",
-            style: GoogleFonts.inter(
-                fontWeight: FontWeight.bold,
-                color: Theme.of(context).colorScheme.onSurface)),
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface)),
         actions: [
           IconButton(
             icon: Icon(_isSearchVisible ? Icons.close : Icons.search),
@@ -1933,8 +2009,8 @@ class _TransactionsTabState extends State<TransactionsTab> {
               IconButton(
                 icon: const Icon(Icons.filter_list),
                 color: (_selectedCategory != null ||
-                    _selectedType != null ||
-                    _selectedAccountId != null)
+                        _selectedType != null ||
+                        _selectedAccountId != null)
                     ? const Color(0xFF2563EB)
                     : Theme.of(context).colorScheme.onSurfaceVariant,
                 onPressed: _showFilterSheet,
@@ -1964,8 +2040,8 @@ class _TransactionsTabState extends State<TransactionsTab> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surface,
-              border:
-              Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
+              border: Border(
+                  bottom: BorderSide(color: Theme.of(context).dividerColor)),
             ),
             child: Row(
               children: [
@@ -1977,7 +2053,8 @@ class _TransactionsTabState extends State<TransactionsTab> {
                       decoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.surfaceVariant,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Theme.of(context).dividerColor),
+                        border:
+                            Border.all(color: Theme.of(context).dividerColor),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -2033,8 +2110,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                                   _selectedType!.name.substring(1),
                               style: const TextStyle(fontSize: 10)),
                           deleteIcon: const Icon(Icons.close, size: 12),
-                          onDeleted: () =>
-                              setState(() => _selectedType = null),
+                          onDeleted: () => setState(() => _selectedType = null),
                           visualDensity: VisualDensity.compact,
                           padding: EdgeInsets.zero,
                         ),
@@ -2045,14 +2121,13 @@ class _TransactionsTabState extends State<TransactionsTab> {
                         child: Chip(
                           label: Text(
                               widget.accounts
-                                  .firstWhere(
-                                      (a) => a.id == _selectedAccountId,
-                                  orElse: () => Account(
-                                      id: -1,
-                                      name: 'Unknown',
-                                      balance: 0,
-                                      type: AccountType.cash,
-                                      createdDate: DateTime.now()))
+                                  .firstWhere((a) => a.id == _selectedAccountId,
+                                      orElse: () => Account(
+                                          id: -1,
+                                          name: 'Unknown',
+                                          balance: 0,
+                                          type: AccountType.cash,
+                                          createdDate: DateTime.now()))
                                   .name,
                               style: const TextStyle(fontSize: 10)),
                           deleteIcon: const Icon(Icons.close, size: 12),
@@ -2096,23 +2171,23 @@ class _TransactionsTabState extends State<TransactionsTab> {
           Expanded(
             child: filtered.isEmpty
                 ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.search_off,
-                        size: 48, color: Colors.blueGrey.shade200),
-                    const SizedBox(height: 16),
-                    Text("No transactions found",
-                        style: GoogleFonts.inter(
-                            color: Colors.blueGrey.shade400)),
-                  ],
-                ))
+                    child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.search_off,
+                          size: 48, color: Colors.blueGrey.shade200),
+                      const SizedBox(height: 16),
+                      Text("No transactions found",
+                          style: GoogleFonts.inter(
+                              color: Colors.blueGrey.shade400)),
+                    ],
+                  ))
                 : ListView.builder(
-              padding: const EdgeInsets.all(20),
-              itemCount: filtered.length,
-              itemBuilder: (ctx, i) => TransactionItem(
-                  transaction: filtered[i], accounts: widget.accounts),
-            ),
+                    padding: const EdgeInsets.all(20),
+                    itemCount: filtered.length,
+                    itemBuilder: (ctx, i) => TransactionItem(
+                        transaction: filtered[i], accounts: widget.accounts),
+                  ),
           ),
         ],
       ),
@@ -2225,8 +2300,7 @@ class AccountsTab extends StatelessWidget {
   Widget _summaryColumn(String label, double amount, Color color) {
     return Column(
       children: [
-        Text(label,
-            style: GoogleFonts.inter(fontSize: 12, color: Colors.grey)),
+        Text(label, style: GoogleFonts.inter(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 4),
         Text(
           FinanceCalculator.formatCurrency(amount),
@@ -2265,76 +2339,82 @@ class AccountsTab extends StatelessWidget {
       ),
       body: accounts.isEmpty
           ? Center(
-          child: Text("No accounts yet",
-              style: GoogleFonts.inter(color: Colors.grey)))
+              child: Text("No accounts yet",
+                  style: GoogleFonts.inter(color: Colors.grey)))
           : ListView(
-        padding: const EdgeInsets.all(20),
-        children: AccountType.values.expand((type) {
-          final typeAccounts = groupedAccounts[type]!;
-          if (typeAccounts.isEmpty) return <Widget>[];
-          return [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Text(
-                type.name[0].toUpperCase() + type.name.substring(1),
-                style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant),
-              ),
-            ),
-            ...typeAccounts.map((acc) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: GestureDetector(
-                onTap: () => _showAccountDetails(context, acc),
-                onLongPress: () => _showAccountSheet(context, account: acc),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border:
-                      Border.all(color: Theme.of(context).dividerColor)),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                            color: acc.color.withOpacity(0.1),
-                            shape: BoxShape.circle),
-                        child: Icon(acc.icon,
-                            color: acc.color, size: 24),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                          children: [
-                            Text(acc.name,
-                                style: GoogleFonts.inter(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: Theme.of(context).colorScheme.onSurface)),
-                            // Removed type text since it's now a section header
-                          ],
-                        ),
-                      ),
-                      Text(
-                        FinanceCalculator.formatCurrency(acc.balance),
-                        style: GoogleFonts.inter(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.onSurface),
-                      ),
-                    ],
+              padding: const EdgeInsets.all(20),
+              children: AccountType.values.expand((type) {
+                final typeAccounts = groupedAccounts[type]!;
+                if (typeAccounts.isEmpty) return <Widget>[];
+                return [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text(
+                      type.name[0].toUpperCase() + type.name.substring(1),
+                      style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
                   ),
-                ),
-              ),
-            ))
-          ];
-        }).toList(),
-      ),
+                  ...typeAccounts.map((acc) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: GestureDetector(
+                          onTap: () => _showAccountDetails(context, acc),
+                          onLongPress: () =>
+                              _showAccountSheet(context, account: acc),
+                          child: Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: Theme.of(context).dividerColor)),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                      color: acc.color.withOpacity(0.1),
+                                      shape: BoxShape.circle),
+                                  child: Icon(acc.icon,
+                                      color: acc.color, size: 24),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(acc.name,
+                                          style: GoogleFonts.inter(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface)),
+                                      // Removed type text since it's now a section header
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  FinanceCalculator.formatCurrency(acc.balance),
+                                  style: GoogleFonts.inter(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ))
+                ];
+              }).toList(),
+            ),
     );
   }
 }
@@ -2358,7 +2438,6 @@ class _ReportsTabState extends State<ReportsTab> {
   DateTime _currentMonth = DateTime.now();
   bool _isPieChart = false;
   ReportType _reportType = ReportType.category;
-
 
   void _changeMonth(int offset) {
     setState(() {
@@ -2386,29 +2465,29 @@ class _ReportsTabState extends State<ReportsTab> {
         String fee = t.fee.toStringAsFixed(2);
         String source = widget.accounts
             .firstWhere((a) => a.id == t.sourceAccountId,
-            orElse: () => Account(
-                id: -1,
-                name: 'Unknown',
-                balance: 0,
-                type: AccountType.cash,
-                createdDate: DateTime.now()))
+                orElse: () => Account(
+                    id: -1,
+                    name: 'Unknown',
+                    balance: 0,
+                    type: AccountType.cash,
+                    createdDate: DateTime.now()))
             .name;
         String target = t.targetAccountId != null
             ? widget.accounts
-            .firstWhere((a) => a.id == t.targetAccountId!,
-            orElse: () => Account(
-                id: -1,
-                name: 'Unknown',
-                balance: 0,
-                type: AccountType.cash,
-                createdDate: DateTime.now()))
-            .name
+                .firstWhere((a) => a.id == t.targetAccountId!,
+                    orElse: () => Account(
+                        id: -1,
+                        name: 'Unknown',
+                        balance: 0,
+                        type: AccountType.cash,
+                        createdDate: DateTime.now()))
+                .name
             : "";
         String details = t.splits != null && t.splits!.isNotEmpty
             ? t.splits!
-            .map(
-                (s) => "${s.category}:${s.subCategory ?? ''} (${s.amount})")
-            .join(" | ")
+                .map(
+                    (s) => "${s.category}:${s.subCategory ?? ''} (${s.amount})")
+                .join(" | ")
             : "";
 
         if (t.note != null && t.note!.isNotEmpty) {
@@ -2454,7 +2533,8 @@ class _ReportsTabState extends State<ReportsTab> {
           t.date.month == _currentMonth.month;
     }).toList();
 
-    final double monthlyExpense = FinanceCalculator.calculateExpense(monthlyTransactions);
+    final double monthlyExpense =
+        FinanceCalculator.calculateExpense(monthlyTransactions);
 
     final Map<String, double> breakdown = FinanceCalculator.calculateBreakdown(
       transactions: monthlyTransactions,
@@ -2466,9 +2546,10 @@ class _ReportsTabState extends State<ReportsTab> {
 
     return Scaffold(
       appBar: AppBar(
-          title: Text('Reports',
-              style: GoogleFonts.inter(
-                  fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+        title: Text('Reports',
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface)),
         actions: [
           IconButton(
             onPressed: () => setState(() => _isPieChart = !_isPieChart),
@@ -2481,7 +2562,7 @@ class _ReportsTabState extends State<ReportsTab> {
             icon: const Icon(Icons.download, size: 18),
             label: const Text("Export CSV"),
             style:
-            TextButton.styleFrom(foregroundColor: const Color(0xFF2563EB)),
+                TextButton.styleFrom(foregroundColor: const Color(0xFF2563EB)),
           ),
           const SizedBox(width: 8),
         ],
@@ -2492,7 +2573,8 @@ class _ReportsTabState extends State<ReportsTab> {
           Container(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
             decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(16)),
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(16)),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -2514,7 +2596,8 @@ class _ReportsTabState extends State<ReportsTab> {
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(16)),
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(16)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2526,21 +2609,24 @@ class _ReportsTabState extends State<ReportsTab> {
                 const SizedBox(height: 4),
                 Text("Income (Green) vs Expense (Red)",
                     style: GoogleFonts.inter(
-                        fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 const SizedBox(height: 32),
                 SizedBox(
                   height: 150,
                   width: double.infinity,
                   child: (() {
                     final comparisonData =
-                    FinanceCalculator.calculateMonthlyComparison(widget.transactions);
+                        FinanceCalculator.calculateMonthlyComparison(
+                            widget.transactions);
                     double maxVal = 1.0;
                     for (var d in comparisonData) {
                       if (d.income > maxVal) maxVal = d.income;
                       if (d.expense > maxVal) maxVal = d.expense;
                     }
                     return CustomPaint(
-                      painter: BarChartPainter(data: comparisonData, maxAmount: maxVal),
+                      painter: BarChartPainter(
+                          data: comparisonData, maxAmount: maxVal),
                     );
                   })(),
                 ),
@@ -2571,10 +2657,10 @@ class _ReportsTabState extends State<ReportsTab> {
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: _reportType == ReportType.category
                             ? [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 2)
-                        ]
+                                BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 2)
+                              ]
                             : [],
                       ),
                       alignment: Alignment.center,
@@ -2583,8 +2669,12 @@ class _ReportsTabState extends State<ReportsTab> {
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
                               color: _reportType == ReportType.category
-                                  ? Theme.of(context).colorScheme.onPrimaryContainer
-                                  : Theme.of(context).colorScheme.onSurfaceVariant)),
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .onPrimaryContainer
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant)),
                     ),
                   ),
                 ),
@@ -2601,10 +2691,10 @@ class _ReportsTabState extends State<ReportsTab> {
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: _reportType == ReportType.accountType
                             ? [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 2)
-                        ]
+                                BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 2)
+                              ]
                             : [],
                       ),
                       alignment: Alignment.center,
@@ -2613,8 +2703,12 @@ class _ReportsTabState extends State<ReportsTab> {
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
                               color: _reportType == ReportType.accountType
-                                  ? Theme.of(context).colorScheme.onPrimaryContainer
-                                  : Theme.of(context).colorScheme.onSurfaceVariant)),
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .onPrimaryContainer
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant)),
                     ),
                   ),
                 ),
@@ -2662,7 +2756,8 @@ class _ReportsTabState extends State<ReportsTab> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(20)),
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(20)),
               child: _isPieChart
                   ? _buildPieChart(sortedBreakdown, monthlyExpense)
                   : _buildBarList(sortedBreakdown, monthlyExpense),
@@ -2821,12 +2916,14 @@ class BarChartPainter extends CustomPainter {
 
     for (int i = 0; i < data.length; i++) {
       double x = i * spacing + spacing / 2;
-      
+
       // Income Bar
-      double incomeHeight = maxAmount > 0 ? (data[i].income / maxAmount) * size.height : 0;
+      double incomeHeight =
+          maxAmount > 0 ? (data[i].income / maxAmount) * size.height : 0;
       canvas.drawRRect(
         RRect.fromRectAndCorners(
-          Rect.fromLTWH(x - barWidth, size.height - incomeHeight, barWidth - 2, incomeHeight),
+          Rect.fromLTWH(x - barWidth, size.height - incomeHeight, barWidth - 2,
+              incomeHeight),
           topLeft: const Radius.circular(4),
           topRight: const Radius.circular(4),
         ),
@@ -2834,10 +2931,12 @@ class BarChartPainter extends CustomPainter {
       );
 
       // Expense Bar
-      double expenseHeight = maxAmount > 0 ? (data[i].expense / maxAmount) * size.height : 0;
+      double expenseHeight =
+          maxAmount > 0 ? (data[i].expense / maxAmount) * size.height : 0;
       canvas.drawRRect(
         RRect.fromRectAndCorners(
-          Rect.fromLTWH(x + 2, size.height - expenseHeight, barWidth - 2, expenseHeight),
+          Rect.fromLTWH(
+              x + 2, size.height - expenseHeight, barWidth - 2, expenseHeight),
           topLeft: const Radius.circular(4),
           topRight: const Radius.circular(4),
         ),
@@ -2850,7 +2949,8 @@ class BarChartPainter extends CustomPainter {
         style: GoogleFonts.inter(fontSize: 10, color: Colors.blueGrey.shade400),
       );
       textPainter.layout();
-      textPainter.paint(canvas, Offset(x - textPainter.width / 2, size.height + 8));
+      textPainter.paint(
+          canvas, Offset(x - textPainter.width / 2, size.height + 8));
     }
   }
 
@@ -2899,7 +2999,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
               onPressed: () {
                 if (ctrl.text.isNotEmpty) {
                   final newCats =
-                  Map<String, List<String>>.from(widget.categories);
+                      Map<String, List<String>>.from(widget.categories);
                   newCats[ctrl.text] = [];
                   _updateCategories(newCats);
                   Navigator.pop(ctx);
@@ -2928,7 +3028,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
               onPressed: () {
                 if (ctrl.text.isNotEmpty) {
                   final newCats =
-                  Map<String, List<String>>.from(widget.categories);
+                      Map<String, List<String>>.from(widget.categories);
                   newCats[category] = List.from(newCats[category]!)
                     ..add(ctrl.text);
                   _updateCategories(newCats);
@@ -2957,28 +3057,28 @@ class _CategoriesTabState extends State<CategoriesTab> {
                 showDialog(
                     context: context,
                     builder: (c) => AlertDialog(
-                      title: const Text("Delete Category?"),
-                      content: const Text(
-                          "This will delete the category and all sub-categories options."),
-                      actions: [
-                        TextButton(
-                            onPressed: () => Navigator.pop(c),
-                            child: const Text("Cancel")),
-                        TextButton(
-                            onPressed: () {
-                              final newCats =
-                              Map<String, List<String>>.from(
-                                  widget.categories);
-                              newCats.remove(oldName);
-                              _updateCategories(newCats);
-                              Navigator.pop(c);
-                              Navigator.pop(ctx);
-                            },
-                            style: TextButton.styleFrom(
-                                foregroundColor: Colors.red),
-                            child: const Text("Delete")),
-                      ],
-                    ));
+                          title: const Text("Delete Category?"),
+                          content: const Text(
+                              "This will delete the category and all sub-categories options."),
+                          actions: [
+                            TextButton(
+                                onPressed: () => Navigator.pop(c),
+                                child: const Text("Cancel")),
+                            TextButton(
+                                onPressed: () {
+                                  final newCats =
+                                      Map<String, List<String>>.from(
+                                          widget.categories);
+                                  newCats.remove(oldName);
+                                  _updateCategories(newCats);
+                                  Navigator.pop(c);
+                                  Navigator.pop(ctx);
+                                },
+                                style: TextButton.styleFrom(
+                                    foregroundColor: Colors.red),
+                                child: const Text("Delete")),
+                          ],
+                        ));
               },
               style: TextButton.styleFrom(foregroundColor: Colors.red),
               child: const Text("Delete")),
@@ -2986,7 +3086,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
               onPressed: () {
                 if (ctrl.text.isNotEmpty && ctrl.text != oldName) {
                   final newCats =
-                  Map<String, List<String>>.from(widget.categories);
+                      Map<String, List<String>>.from(widget.categories);
                   final subs = newCats.remove(oldName);
                   newCats[ctrl.text] = subs!;
                   _updateCategories(newCats);
@@ -3013,7 +3113,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
           TextButton(
               onPressed: () {
                 final newCats =
-                Map<String, List<String>>.from(widget.categories);
+                    Map<String, List<String>>.from(widget.categories);
                 newCats[category] = List.from(newCats[category]!)
                   ..remove(oldSub);
                 _updateCategories(newCats);
@@ -3025,7 +3125,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
               onPressed: () {
                 if (ctrl.text.isNotEmpty) {
                   final newCats =
-                  Map<String, List<String>>.from(widget.categories);
+                      Map<String, List<String>>.from(widget.categories);
                   final list = List<String>.from(newCats[category]!);
                   final idx = list.indexOf(oldSub);
                   if (idx != -1) list[idx] = ctrl.text;
@@ -3078,7 +3178,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
                   icon: const Icon(Icons.edit, size: 18),
                   onPressed: () => _editCategory(cat)),
               childrenPadding:
-              const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                  const EdgeInsets.only(left: 16, right: 16, bottom: 16),
               expandedCrossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Wrap(
@@ -3086,19 +3186,25 @@ class _CategoriesTabState extends State<CategoriesTab> {
                   runSpacing: 8,
                   children: [
                     ...subs.map((sub) => GestureDetector(
-                      onLongPress: () => _editSubCategory(cat, sub),
-                      child: Chip(
-                        label: Text(sub,
-                            style: GoogleFonts.inter(fontSize: 14)),
-                        backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-                        side: BorderSide.none,
-                      ),
-                    )),
+                          onLongPress: () => _editSubCategory(cat, sub),
+                          child: Chip(
+                            label: Text(sub,
+                                style: GoogleFonts.inter(fontSize: 14)),
+                            backgroundColor: Theme.of(context)
+                                .colorScheme
+                                .secondaryContainer,
+                            side: BorderSide.none,
+                          ),
+                        )),
                     ActionChip(
                       label:
-                      const Icon(Icons.add, size: 16, color: Colors.blue),
+                          const Icon(Icons.add, size: 16, color: Colors.blue),
                       backgroundColor: Theme.of(context).colorScheme.surface,
-                      side: BorderSide(color: Theme.of(context).colorScheme.primary.withOpacity(0.2)),
+                      side: BorderSide(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withOpacity(0.2)),
                       onPressed: () => _addSubCategory(cat),
                     )
                   ],
@@ -3131,7 +3237,7 @@ class TransactionItem extends StatelessWidget {
     final txn = transaction;
 
     final sourceAccount = accounts.firstWhere(
-            (a) => a.id == txn.sourceAccountId,
+        (a) => a.id == txn.sourceAccountId,
         orElse: () => Account(
             id: -1,
             name: 'Unknown',
@@ -3165,7 +3271,7 @@ class TransactionItem extends StatelessWidget {
 
     if (txn.type == TransactionType.transfer && txn.targetAccountId != null) {
       final targetAccount = accounts.firstWhere(
-              (a) => a.id == txn.targetAccountId,
+          (a) => a.id == txn.targetAccountId,
           orElse: () => Account(
               id: -1,
               name: 'Unknown',
@@ -3199,24 +3305,24 @@ class TransactionItem extends StatelessWidget {
 
     final accountName = accounts
         .firstWhere((a) => a.id == transaction.sourceAccountId,
-        orElse: () => Account(
-            id: -1,
-            name: 'Unknown',
-            balance: 0,
-            type: AccountType.cash,
-            createdDate: DateTime.now()))
+            orElse: () => Account(
+                id: -1,
+                name: 'Unknown',
+                balance: 0,
+                type: AccountType.cash,
+                createdDate: DateTime.now()))
         .name;
 
     String? targetAccountName;
     if (transaction.targetAccountId != null) {
       targetAccountName = accounts
           .firstWhere((a) => a.id == transaction.targetAccountId,
-          orElse: () => Account(
-              id: -1,
-              name: 'Unknown',
-              balance: 0,
-              type: AccountType.cash,
-              createdDate: DateTime.now()))
+              orElse: () => Account(
+                  id: -1,
+                  name: 'Unknown',
+                  balance: 0,
+                  type: AccountType.cash,
+                  createdDate: DateTime.now()))
           .name;
     }
 
@@ -3259,19 +3365,19 @@ class TransactionItem extends StatelessWidget {
                       style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   ...transaction.splits!.map((s) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                            "${s.category}${s.subCategory != null ? ' - ${s.subCategory}' : ''}",
-                            style: GoogleFonts.inter(fontSize: 13)),
-                        Text(formatCurrency(s.amount),
-                            style: GoogleFonts.inter(
-                                fontWeight: FontWeight.w500)),
-                      ],
-                    ),
-                  )),
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                                "${s.category}${s.subCategory != null ? ' - ${s.subCategory}' : ''}",
+                                style: GoogleFonts.inter(fontSize: 13)),
+                            Text(formatCurrency(s.amount),
+                                style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                      )),
                 ] else ...[
                   _detailRow("Category", transaction.category),
                   if (transaction.subCategory != null)
@@ -3301,8 +3407,7 @@ class TransactionItem extends StatelessWidget {
           SizedBox(
             width: 90, // Slightly increased for "From Account"
             child: Text(label,
-                style: GoogleFonts.inter(
-                    color: Colors.grey, fontSize: 13)),
+                style: GoogleFonts.inter(color: Colors.grey, fontSize: 13)),
           ),
           Expanded(
             child: Text(value,
@@ -3322,7 +3427,7 @@ class TransactionItem extends StatelessWidget {
         transaction.splits != null && transaction.splits!.isNotEmpty;
 
     Color color =
-    isIncome ? Colors.green : (isTransfer ? Colors.blue : Colors.red);
+        isIncome ? Colors.green : (isTransfer ? Colors.blue : Colors.red);
     IconData icon = isIncome
         ? Icons.arrow_upward
         : (isTransfer ? Icons.swap_horiz : Icons.trending_down);
@@ -3335,7 +3440,8 @@ class TransactionItem extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
         decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(16)),
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(16)),
         child: Row(
           children: [
             Container(
@@ -3355,17 +3461,20 @@ class TransactionItem extends StatelessWidget {
                           isTransfer
                               ? 'Wallet Transfer'
                               : (isIncome
-                              ? 'Income'
-                              : (isSplit
-                              ? 'Split Expense'
-                              : transaction.category)),
+                                  ? 'Income'
+                                  : (isSplit
+                                      ? 'Split Expense'
+                                      : transaction.category)),
                           style:
-                          GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                              GoogleFonts.inter(fontWeight: FontWeight.w600)),
                       if (transaction.recurrence != RecurrenceFrequency.none)
                         Padding(
                           padding: const EdgeInsets.only(left: 6.0),
-                          child:
-                          Icon(Icons.repeat, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          child: Icon(Icons.repeat,
+                              size: 14,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant),
                         ),
                     ],
                   ),
@@ -3375,7 +3484,10 @@ class TransactionItem extends StatelessWidget {
                     children: [
                       Text(DateFormat('dd MMM').format(transaction.date),
                           style: GoogleFonts.inter(
-                              fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                              fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant)),
                       if (isTransfer && transaction.targetAccountId != null)
                         Text(
                             '• To: ${accounts.firstWhere((a) => a.id == transaction.targetAccountId, orElse: () => Account(id: -1, name: 'Unknown', balance: 0, type: AccountType.cash, createdDate: DateTime.now())).name}',
@@ -3473,7 +3585,8 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
     if (widget.existingAccount != null) {
       _nameCtrl.text = widget.existingAccount!.name;
       // Convert from base INR to current display currency
-      final displayBalance = FinanceCalculator.convertFromBase(widget.existingAccount!.balance);
+      final displayBalance =
+          FinanceCalculator.convertFromBase(widget.existingAccount!.balance);
       _balanceCtrl.text = displayBalance.toStringAsFixed(2);
       _selectedType = widget.existingAccount!.type;
       _selectedDate = widget.existingAccount!.createdDate;
@@ -3584,10 +3697,10 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
                           borderRadius: BorderRadius.circular(10),
                           boxShadow: isSelected
                               ? [
-                            BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 4)
-                          ]
+                                  BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 4)
+                                ]
                               : []),
                       alignment: Alignment.center,
                       child: Text(
@@ -3608,7 +3721,7 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
           TextField(
               controller: _nameCtrl,
               style:
-              GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
+                  GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
               decoration: const InputDecoration(
                   hintText: 'Account Name',
                   labelText: "Name",
@@ -3621,9 +3734,10 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
                 FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
               ],
               style:
-              GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
+                  GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
-                  prefixText: '${FinanceCalculator.getSelectedCurrencySymbol()} ',
+                  prefixText:
+                      '${FinanceCalculator.getSelectedCurrencySymbol()} ',
                   border: InputBorder.none,
                   hintText: '0.00 (Optional)')),
           GestureDetector(
@@ -3746,10 +3860,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
         _isSplitMode = true;
         // Also convert splits from base
         _currentSplits.addAll(t.splits!.map((s) => TransactionSplit(
-          category: s.category,
-          subCategory: s.subCategory,
-          amount: FinanceCalculator.convertFromBase(s.amount),
-        )));
+              category: s.category,
+              subCategory: s.subCategory,
+              amount: FinanceCalculator.convertFromBase(s.amount),
+            )));
       }
     }
   }
@@ -3823,7 +3937,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     }
 
     final double currentTotalSplits =
-    _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
+        _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     final double remaining = totalAmount - currentTotalSplits;
 
     if (splitAmt > remaining + 0.01) {
@@ -3855,7 +3969,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       if ((splitTotal - displayAmount).abs() > 0.01) {
         setState(() {
           _submitErrorText =
-          "Split total (${splitTotal.toStringAsFixed(2)}) != Amount (${displayAmount.toStringAsFixed(2)})";
+              "Split total (${splitTotal.toStringAsFixed(2)}) != Amount (${displayAmount.toStringAsFixed(2)})";
         });
         return;
       }
@@ -3914,7 +4028,8 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
     tempBalances.forEach((id, newBalance) {
       final accRef = userDoc.collection('accounts').doc(id.toString());
-      batch.update(accRef, {'balance': EncryptionService.encryptDouble(newBalance)});
+      batch.update(
+          accRef, {'balance': EncryptionService.encryptDouble(newBalance)});
     });
 
     final newTxn = Transaction(
@@ -3924,22 +4039,24 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       type: _selectedType,
       sourceAccountId: _selectedSourceId,
       targetAccountId:
-      _selectedType == TransactionType.transfer ? _selectedTargetId : null,
+          _selectedType == TransactionType.transfer ? _selectedTargetId : null,
       category: _selectedType == TransactionType.expense
           ? (_isSplitMode ? 'Split' : _selectedCategory)
           : (_selectedType == TransactionType.income
-          ? _selectedCategory
-          : 'Transfer'),
+              ? _selectedCategory
+              : 'Transfer'),
       subCategory: _selectedType == TransactionType.expense
           ? (_isSplitMode ? null : _selectedSubCategory)
           : null,
       date: _selectedDate,
       splits: _isSplitMode
-          ? _currentSplits.map((s) => TransactionSplit(
-        category: s.category,
-        subCategory: s.subCategory,
-        amount: FinanceCalculator.convertToBase(s.amount),
-      )).toList()
+          ? _currentSplits
+              .map((s) => TransactionSplit(
+                    category: s.category,
+                    subCategory: s.subCategory,
+                    amount: FinanceCalculator.convertToBase(s.amount),
+                  ))
+              .toList()
           : null,
       note: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
       recurrence: _recurrence,
@@ -3956,7 +4073,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     if (_selectedType == TransactionType.transfer) {
       if (_selectedSourceId == _selectedTargetId) {
         final available =
-        widget.accounts.where((a) => a.id != _selectedSourceId);
+            widget.accounts.where((a) => a.id != _selectedSourceId);
         if (available.isNotEmpty) _selectedTargetId = available.first.id;
       }
     }
@@ -3979,11 +4096,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     }
 
     final currentTotal =
-    _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
+        _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     if ((currentTotal + amt) > totalAmount + 0.01) {
       setState(() {
         _splitErrorText =
-        "Exceeds total! Rem: ${FinanceCalculator.getSelectedCurrencySymbol()}${(totalAmount - currentTotal).toStringAsFixed(2)}";
+            "Exceeds total! Rem: ${FinanceCalculator.getSelectedCurrencySymbol()}${(totalAmount - currentTotal).toStringAsFixed(2)}";
       });
       return;
     }
@@ -4011,7 +4128,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   Widget build(BuildContext context) {
     final double totalAmount = double.tryParse(_amountCtrl.text) ?? 0;
     final double currentSplitTotal =
-    _currentSplits.fold(0, (sum, item) => sum + item.amount);
+        _currentSplits.fold(0, (sum, item) => sum + item.amount);
     final double remaining = totalAmount - currentSplitTotal;
 
     // Sort accounts for dropdown
@@ -4023,8 +4140,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
     // Sort subcategories if category selected
     List<String> sortedSubCategories = [];
-    if (_selectedCategory.isNotEmpty && _expenseCategories[_selectedCategory] != null) {
-      sortedSubCategories = List<String>.from(_expenseCategories[_selectedCategory]!)..sort();
+    if (_selectedCategory.isNotEmpty &&
+        _expenseCategories[_selectedCategory] != null) {
+      sortedSubCategories =
+          List<String>.from(_expenseCategories[_selectedCategory]!)..sort();
     }
 
     return Container(
@@ -4074,15 +4193,16 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         decoration: BoxDecoration(
-                            color:
-                            isSelected ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
+                            color: isSelected
+                                ? Theme.of(context).colorScheme.primaryContainer
+                                : Colors.transparent,
                             borderRadius: BorderRadius.circular(10),
                             boxShadow: isSelected
                                 ? [
-                              BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 4)
-                            ]
+                                    BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 4)
+                                  ]
                                 : []),
                         alignment: Alignment.center,
                         child: Text(
@@ -4091,8 +4211,12 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 fontWeight: FontWeight.w600,
                                 fontSize: 13,
                                 color: isSelected
-                                    ? Theme.of(context).colorScheme.onPrimaryContainer
-                                    : Theme.of(context).colorScheme.onSurfaceVariant)),
+                                    ? Theme.of(context)
+                                        .colorScheme
+                                        .onPrimaryContainer
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant)),
                       ),
                     ),
                   );
@@ -4104,10 +4228,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
               onTap: _pickDate,
               child: Container(
                   padding:
-                  const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                   decoration: BoxDecoration(
-                       border: Border.all(color: Theme.of(context).dividerColor),
-                       borderRadius: BorderRadius.circular(12)),
+                      const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(context).dividerColor),
+                      borderRadius: BorderRadius.circular(12)),
                   child: Row(children: [
                     const Icon(Icons.calendar_today,
                         size: 18, color: Colors.blue),
@@ -4136,7 +4260,8 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                     fontSize: 24, fontWeight: FontWeight.bold),
                 decoration: InputDecoration(
                     labelText: "AMOUNT",
-                    prefixText: '${FinanceCalculator.getSelectedCurrencySymbol()} ',
+                    prefixText:
+                        '${FinanceCalculator.getSelectedCurrencySymbol()} ',
                     border: InputBorder.none)),
             const Divider(),
             const SizedBox(height: 16),
@@ -4152,12 +4277,12 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 underline: const SizedBox(),
                 items: sortedAccounts
                     .map((a) =>
-                    DropdownMenuItem(value: a.id, child: Text(a.name)))
+                        DropdownMenuItem(value: a.id, child: Text(a.name)))
                     .toList(),
                 onChanged: (val) => setState(() {
-                  _selectedSourceId = val!;
-                  _ensureValidTarget();
-                })),
+                      _selectedSourceId = val!;
+                      _ensureValidTarget();
+                    })),
             if (_selectedType == TransactionType.transfer) ...[
               const SizedBox(height: 16),
               Text('TO',
@@ -4172,7 +4297,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                   items: sortedAccounts
                       .where((a) => a.id != _selectedSourceId)
                       .map((a) =>
-                      DropdownMenuItem(value: a.id, child: Text(a.name)))
+                          DropdownMenuItem(value: a.id, child: Text(a.name)))
                       .toList(),
                   onChanged: (val) => setState(() => _selectedTargetId = val!)),
               const SizedBox(height: 16),
@@ -4184,7 +4309,8 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                   ],
                   decoration: InputDecoration(
                       labelText: "FEE",
-                      prefixText: '${FinanceCalculator.getSelectedCurrencySymbol()} ',
+                      prefixText:
+                          '${FinanceCalculator.getSelectedCurrencySymbol()} ',
                       border: InputBorder.none)),
             ],
             if (_selectedType == TransactionType.income) ...[
@@ -4200,15 +4326,18 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                   runSpacing: 8,
                   children: _incomeCategories // Already sorted in initState
                       .map((c) => ChoiceChip(
-                      label: Text(c),
-                      selected: _selectedCategory == c,
-                      onSelected: (val) =>
-                          setState(() => _selectedCategory = c),
-                      selectedColor: Theme.of(context).colorScheme.primaryContainer,
-                      labelStyle: TextStyle(
-                          color: _selectedCategory == c 
-                              ? Theme.of(context).colorScheme.onPrimaryContainer 
-                              : Theme.of(context).colorScheme.onSurface)))
+                          label: Text(c),
+                          selected: _selectedCategory == c,
+                          onSelected: (val) =>
+                              setState(() => _selectedCategory = c),
+                          selectedColor:
+                              Theme.of(context).colorScheme.primaryContainer,
+                          labelStyle: TextStyle(
+                              color: _selectedCategory == c
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .onPrimaryContainer
+                                  : Theme.of(context).colorScheme.onSurface)))
                       .toList()),
             ],
             if (_selectedType == TransactionType.expense) ...[
@@ -4246,14 +4375,15 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 child: Text(
                                     '${entry.value.category} > ${entry.value.subCategory}',
                                     style: GoogleFonts.inter(fontSize: 13))),
-                            Text('${FinanceCalculator.getSelectedCurrencySymbol()}${entry.value.amount.toInt()}',
+                            Text(
+                                '${FinanceCalculator.getSelectedCurrencySymbol()}${entry.value.amount.toInt()}',
                                 style: GoogleFonts.inter(
                                     fontWeight: FontWeight.bold)),
                             IconButton(
                                 onPressed: () => setState(() {
-                                  _currentSplits.removeAt(entry.key);
-                                  _validateSplitAmount();
-                                }),
+                                      _currentSplits.removeAt(entry.key);
+                                      _validateSplitAmount();
+                                    }),
                                 icon: const Icon(Icons.close,
                                     size: 16, color: Colors.red))
                           ]))),
@@ -4268,18 +4398,20 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                   underline: const SizedBox(),
                                   items: sortedExpenseCategories
                                       .map((c) => DropdownMenuItem(
-                                      value: c, child: Text(c)))
+                                          value: c, child: Text(c)))
                                       .toList(),
                                   onChanged: (val) => setState(() {
-                                    _selectedCategory = val!;
-                                    final subs = _expenseCategories[val];
-                                    if (subs != null && subs.isNotEmpty) {
-                                      final sortedSubs = List<String>.from(subs)..sort();
-                                      _selectedSubCategory = sortedSubs.first;
-                                    } else {
-                                      _selectedSubCategory = null;
-                                    }
-                                  }))),
+                                        _selectedCategory = val!;
+                                        final subs = _expenseCategories[val];
+                                        if (subs != null && subs.isNotEmpty) {
+                                          final sortedSubs =
+                                              List<String>.from(subs)..sort();
+                                          _selectedSubCategory =
+                                              sortedSubs.first;
+                                        } else {
+                                          _selectedSubCategory = null;
+                                        }
+                                      }))),
                           const SizedBox(width: 8),
                           Expanded(
                               flex: 2,
@@ -4289,10 +4421,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                   underline: const SizedBox(),
                                   items: sortedSubCategories
                                       .map((s) => DropdownMenuItem(
-                                      value: s, child: Text(s)))
+                                          value: s, child: Text(s)))
                                       .toList(),
                                   onChanged: (val) => setState(
-                                          () => _selectedSubCategory = val)))
+                                      () => _selectedSubCategory = val)))
                         ]),
                         Row(children: [
                           Expanded(
@@ -4305,7 +4437,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                   ],
                                   decoration: InputDecoration(
                                       hintText:
-                                      'Remaining: ${remaining.toStringAsFixed(2)}',
+                                          'Remaining: ${remaining.toStringAsFixed(2)}',
                                       errorText: _splitErrorText,
                                       isDense: true))),
                           TextButton(
@@ -4326,25 +4458,33 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                     child: Row(
                         children: sortedExpenseCategories
                             .map((c) => Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                                label: Text(c),
-                                selected: _selectedCategory == c,
-                                onSelected: (val) => setState(() {
-                                  _selectedCategory = c;
-                                  final subs = _expenseCategories[c];
-                                  if (subs != null && subs.isNotEmpty) {
-                                    final sortedSubs = List<String>.from(subs)..sort();
-                                    _selectedSubCategory = sortedSubs.first;
-                                  } else {
-                                    _selectedSubCategory = null;
-                                  }
-                                }),
-                                selectedColor: Theme.of(context).colorScheme.primaryContainer,
-                                labelStyle: TextStyle(
-                                    color: _selectedCategory == c 
-                                        ? Theme.of(context).colorScheme.onPrimaryContainer 
-                                        : Theme.of(context).colorScheme.onSurface))))
+                                padding: const EdgeInsets.only(right: 8),
+                                child: ChoiceChip(
+                                    label: Text(c),
+                                    selected: _selectedCategory == c,
+                                    onSelected: (val) => setState(() {
+                                          _selectedCategory = c;
+                                          final subs = _expenseCategories[c];
+                                          if (subs != null && subs.isNotEmpty) {
+                                            final sortedSubs =
+                                                List<String>.from(subs)..sort();
+                                            _selectedSubCategory =
+                                                sortedSubs.first;
+                                          } else {
+                                            _selectedSubCategory = null;
+                                          }
+                                        }),
+                                    selectedColor: Theme.of(context)
+                                        .colorScheme
+                                        .primaryContainer,
+                                    labelStyle: TextStyle(
+                                        color: _selectedCategory == c
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .onPrimaryContainer
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .onSurface))))
                             .toList())),
                 if (_selectedSubCategory != null &&
                     _expenseCategories[_selectedCategory] != null) ...[
@@ -4360,15 +4500,21 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                       runSpacing: 8,
                       children: sortedSubCategories // Use sorted list
                           .map((sub) => ChoiceChip(
-                          label: Text(sub),
-                          selected: _selectedSubCategory == sub,
-                          onSelected: (val) =>
-                              setState(() => _selectedSubCategory = sub),
-                          selectedColor: Theme.of(context).colorScheme.primaryContainer,
-                          labelStyle: TextStyle(
-                              color: _selectedSubCategory == sub 
-                                  ? Theme.of(context).colorScheme.onPrimaryContainer 
-                                  : Theme.of(context).colorScheme.onSurface)))
+                              label: Text(sub),
+                              selected: _selectedSubCategory == sub,
+                              onSelected: (val) =>
+                                  setState(() => _selectedSubCategory = sub),
+                              selectedColor: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer,
+                              labelStyle: TextStyle(
+                                  color: _selectedSubCategory == sub
+                                      ? Theme.of(context)
+                                          .colorScheme
+                                          .onPrimaryContainer
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .onSurface)))
                           .toList())
                 ],
               ],
@@ -4452,9 +4598,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 class AccountTypeAdapter extends TypeAdapter<AccountType> {
   @override
   final int typeId = 3;
+
   @override
   AccountType read(BinaryReader reader) =>
       AccountType.values[reader.readByte()];
+
   @override
   void write(BinaryWriter writer, AccountType obj) =>
       writer.writeByte(obj.index);
@@ -4463,9 +4611,11 @@ class AccountTypeAdapter extends TypeAdapter<AccountType> {
 class TransactionTypeAdapter extends TypeAdapter<TransactionType> {
   @override
   final int typeId = 4;
+
   @override
   TransactionType read(BinaryReader reader) =>
       TransactionType.values[reader.readByte()];
+
   @override
   void write(BinaryWriter writer, TransactionType obj) =>
       writer.writeByte(obj.index);
@@ -4474,11 +4624,13 @@ class TransactionTypeAdapter extends TypeAdapter<TransactionType> {
 class TransactionSplitAdapter extends TypeAdapter<TransactionSplit> {
   @override
   final int typeId = 2;
+
   @override
   TransactionSplit read(BinaryReader reader) => TransactionSplit(
       amount: reader.readDouble(),
       category: reader.readString(),
       subCategory: reader.readBool() ? reader.readString() : null);
+
   @override
   void write(BinaryWriter writer, TransactionSplit obj) {
     writer.writeDouble(obj.amount);
@@ -4491,6 +4643,7 @@ class TransactionSplitAdapter extends TypeAdapter<TransactionSplit> {
 class AccountAdapter extends TypeAdapter<Account> {
   @override
   final int typeId = 0;
+
   @override
   Account read(BinaryReader reader) => Account(
       id: reader.readInt(),
@@ -4498,6 +4651,7 @@ class AccountAdapter extends TypeAdapter<Account> {
       balance: reader.readDouble(),
       type: AccountType.values[reader.readByte()],
       createdDate: DateTime.fromMillisecondsSinceEpoch(reader.readInt()));
+
   @override
   void write(BinaryWriter writer, Account obj) {
     writer.writeInt(obj.id);
@@ -4511,6 +4665,7 @@ class AccountAdapter extends TypeAdapter<Account> {
 class TransactionAdapter extends TypeAdapter<Transaction> {
   @override
   final int typeId = 1;
+
   @override
   Transaction read(BinaryReader reader) {
     final id = reader.readString();
