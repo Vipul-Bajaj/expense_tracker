@@ -3255,13 +3255,6 @@ class TransactionItem extends StatelessWidget {
       } else if (txn.type == TransactionType.income) {
         newBalance -= txn.amount;
       }
-      // Note: EncryptionService handles double -> encrypted string inside the model's toMap().
-      // However, for updates, we often need to set specific fields.
-      // Since toMap handles encryption, we can create a temporary Account object and use toMap,
-      // or manually encrypt here.
-
-      // Let's create a temp object update logic via `userDoc` which is cleaner.
-      // But `update` requires a Map.
 
       userDoc
           .collection('accounts')
@@ -3288,6 +3281,23 @@ class TransactionItem extends StatelessWidget {
     }
 
     userDoc.collection('transactions').doc(id).delete();
+  }
+
+  void _stopRecurrence(BuildContext context) {
+    final user = AuthService.currentUser;
+    if (user == null) return;
+
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('transactions')
+        .doc(transaction.id)
+        .update({'recurrence': RecurrenceFrequency.none.index});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text("Future recurrence stopped for this transaction.")),
+    );
   }
 
   void _showEditSheet(BuildContext context) {
@@ -3391,6 +3401,15 @@ class TransactionItem extends StatelessWidget {
           ),
         ),
         actions: [
+          if (transaction.recurrence != RecurrenceFrequency.none)
+            TextButton(
+              onPressed: () {
+                _stopRecurrence(context);
+                Navigator.pop(ctx);
+              },
+              child: const Text("Stop Recurrence",
+                  style: TextStyle(color: Colors.orange)),
+            ),
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text("Close")),
         ],
@@ -3405,7 +3424,7 @@ class TransactionItem extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 90, // Slightly increased for "From Account"
+            width: 90,
             child: Text(label,
                 style: GoogleFonts.inter(color: Colors.grey, fontSize: 13)),
           ),
@@ -3537,6 +3556,7 @@ class TransactionItem extends StatelessWidget {
                 if (val == 'edit') _showEditSheet(context);
                 if (val == 'delete')
                   _deleteTransaction(context, transaction.id);
+                if (val == 'stop') _stopRecurrence(context);
               },
               itemBuilder: (ctx) => [
                 const PopupMenuItem(
@@ -3546,6 +3566,17 @@ class TransactionItem extends StatelessWidget {
                       SizedBox(width: 8),
                       Text("Edit")
                     ])),
+                // Only show Stop Recurrence if currently recurring
+                if (transaction.recurrence != RecurrenceFrequency.none)
+                  const PopupMenuItem(
+                      value: 'stop',
+                      child: Row(children: [
+                        Icon(Icons.stop_circle_outlined,
+                            size: 18, color: Colors.orange),
+                        SizedBox(width: 8),
+                        Text("Stop Recurrence",
+                            style: TextStyle(color: Colors.orange))
+                      ])),
                 const PopupMenuItem(
                     value: 'delete',
                     child: Row(children: [
