@@ -2186,7 +2186,9 @@ class _TransactionsTabState extends State<TransactionsTab> {
                     padding: const EdgeInsets.all(20),
                     itemCount: filtered.length,
                     itemBuilder: (ctx, i) => TransactionItem(
-                        transaction: filtered[i], accounts: widget.accounts),
+                        transaction: filtered[i],
+                        accounts: widget.accounts,
+                        currentAccountId: _selectedAccountId),
                   ),
           ),
         ],
@@ -2287,7 +2289,9 @@ class AccountsTab extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   itemCount: accountTxns.length,
                   itemBuilder: (ctx, i) => TransactionItem(
-                      transaction: accountTxns[i], accounts: accounts),
+                      transaction: accountTxns[i],
+                      accounts: accounts,
+                      currentAccountId: account.id),
                 ),
               ),
             ],
@@ -3223,9 +3227,13 @@ class _CategoriesTabState extends State<CategoriesTab> {
 class TransactionItem extends StatelessWidget {
   final Transaction transaction;
   final List<Account> accounts;
+  final int? currentAccountId;
 
   const TransactionItem(
-      {super.key, required this.transaction, required this.accounts});
+      {super.key,
+      required this.transaction,
+      required this.accounts,
+      this.currentAccountId});
 
   void _deleteTransaction(BuildContext context, String id) {
     final user = AuthService.currentUser;
@@ -3445,13 +3453,42 @@ class TransactionItem extends StatelessWidget {
     final isSplit =
         transaction.splits != null && transaction.splits!.isNotEmpty;
 
-    Color color =
-        isIncome ? Colors.green : (isTransfer ? Colors.blue : Colors.red);
-    IconData icon = isIncome
-        ? Icons.arrow_upward
-        : (isTransfer ? Icons.swap_horiz : Icons.trending_down);
+    // Check if this is a transfer INTO the currently viewed account
+    bool isIncomingTransfer = false;
+    if (isTransfer &&
+        currentAccountId != null &&
+        transaction.targetAccountId == currentAccountId) {
+      isIncomingTransfer = true;
+    }
+
+    // Determine colors and icons based on simplified logic + incoming transfer support
+    Color color;
+    IconData icon;
+    String sign;
+
+    if (isIncome || isIncomingTransfer) {
+      color = Colors.green;
+      icon = Icons.arrow_upward;
+      sign = "+";
+    } else if (isTransfer) {
+      // Outgoing transfer or unspecified view
+      color = Colors.blue;
+      icon = Icons.swap_horiz;
+      sign = "-"; // Default for outgoing
+    } else {
+      // Expense
+      color = Colors.red;
+      icon = Icons.trending_down;
+      sign = "-";
+    }
+
     String amountText = FinanceCalculator.formatCurrency(
-        transaction.amount + (isTransfer ? transaction.fee : 0));
+        transaction.amount + (isTransfer && !isIncomingTransfer ? transaction.fee : 0));
+
+    // If incoming transfer, we only show the amount received (no fee)
+    if (isIncomingTransfer) {
+        amountText = FinanceCalculator.formatCurrency(transaction.amount);
+    }
 
     return GestureDetector(
       onTap: () => _showTransactionDetails(context),
@@ -3478,7 +3515,7 @@ class TransactionItem extends StatelessWidget {
                     children: [
                       Text(
                           isTransfer
-                              ? 'Wallet Transfer'
+                              ? 'Transfer'
                               : (isIncome
                                   ? 'Income'
                                   : (isSplit
@@ -3507,9 +3544,16 @@ class TransactionItem extends StatelessWidget {
                               color: Theme.of(context)
                                   .colorScheme
                                   .onSurfaceVariant)),
-                      if (isTransfer && transaction.targetAccountId != null)
+                      if (isTransfer && transaction.targetAccountId != null && !isIncomingTransfer)
                         Text(
                             '• To: ${accounts.firstWhere((a) => a.id == transaction.targetAccountId, orElse: () => Account(id: -1, name: 'Unknown', balance: 0, type: AccountType.cash, createdDate: DateTime.now())).name}',
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: Colors.blueGrey.shade400,
+                                fontWeight: FontWeight.bold)),
+                       if (isTransfer && isIncomingTransfer)
+                        Text(
+                            '• From: ${accounts.firstWhere((a) => a.id == transaction.sourceAccountId, orElse: () => Account(id: -1, name: 'Unknown', balance: 0, type: AccountType.cash, createdDate: DateTime.now())).name}',
                             style: GoogleFonts.inter(
                                 fontSize: 11,
                                 color: Colors.blueGrey.shade400,
@@ -3525,7 +3569,7 @@ class TransactionItem extends StatelessWidget {
                         Text('• ${transaction.splits!.length} items',
                             style: GoogleFonts.inter(
                                 fontSize: 11, color: Colors.blueGrey.shade400)),
-                      if (transaction.fee > 0)
+                      if (transaction.fee > 0 && !isIncomingTransfer)
                         Text('• Fee: ${transaction.fee}',
                             style: GoogleFonts.inter(
                                 fontSize: 10, color: Colors.red.shade400)),
@@ -3547,7 +3591,7 @@ class TransactionItem extends StatelessWidget {
                 ],
               ),
             ),
-            Text('${isIncome ? "+" : "-"}$amountText',
+            Text('$sign$amountText',
                 style: GoogleFonts.inter(
                     fontWeight: FontWeight.bold, color: color)),
             PopupMenuButton<String>(
