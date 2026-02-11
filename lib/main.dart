@@ -4338,7 +4338,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       _noteCtrl.text = t.note ?? '';
       _selectedSourceId = t.sourceAccountId;
       if (t.targetAccountId != null) _selectedTargetId = t.targetAccountId!;
-      _selectedCategory = t.category;
+      _selectedCategory = t.category == 'Split' ? '' : t.category;
       _selectedSubCategory = t.subCategory;
       _selectedDate = t.date;
       _recurrence = t.recurrence;
@@ -4601,6 +4601,13 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     });
   }
 
+  void _removeSplit(int index) {
+    setState(() {
+      _currentSplits.removeAt(index);
+      _validateSplitAmount();
+    });
+  }
+
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
         context: context,
@@ -4825,10 +4832,15 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             ],
 
             // Category
-            if (_selectedType == TransactionType.expense ||
-                _selectedType == TransactionType.income)
+            if ((_selectedType == TransactionType.expense ||
+                    _selectedType == TransactionType.income) &&
+                !_isSplitMode)
               DropdownButtonFormField<String>(
-                value: _selectedCategory,
+                value: (_selectedType == TransactionType.expense
+                        ? sortedExpenseCategories.contains(_selectedCategory)
+                        : _incomeCategories.contains(_selectedCategory))
+                    ? _selectedCategory
+                    : null,
                 decoration: InputDecoration(
                   labelText: 'Category',
                   border: OutlineInputBorder(
@@ -4850,7 +4862,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
              if (_selectedType == TransactionType.investment) ...[
               DropdownButtonFormField<String>(
-                value: _selectedSubCategory,
+                value: ((_expenseCategories['Investment'] ?? [])
+                        .contains(_selectedSubCategory))
+                    ? _selectedSubCategory
+                    : null,
                 decoration: InputDecoration(
                   labelText: 'Investment Type',
                   border: OutlineInputBorder(
@@ -4868,10 +4883,13 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             if ((_selectedType == TransactionType.expense ||
                     _selectedType == TransactionType.income) &&
                 _selectedCategory.isNotEmpty &&
+                !_isSplitMode &&
                 _expenseCategories[_selectedCategory] != null) ...[
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _selectedSubCategory,
+                value: (sortedSubCategories.contains(_selectedSubCategory))
+                    ? _selectedSubCategory
+                    : null,
                 decoration: InputDecoration(
                   labelText: 'Sub-Category',
                   border: OutlineInputBorder(
@@ -4887,32 +4905,183 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
             if (_selectedType == TransactionType.expense) ...[
               const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: _isSplitMode
-                    ? () => setState(() => _isSplitMode = false)
-                    : () => setState(() => _isSplitMode = true),
-                icon: Icon(_isSplitMode ? Icons.close : Icons.call_split),
-                label: Text(
-                    _isSplitMode ? "Cancel Split" : "Split Transaction"),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _isSplitMode = !_isSplitMode;
+                      if (!_isSplitMode) _currentSplits.clear();
+                    });
+                  },
+                  icon: Icon(_isSplitMode ? Icons.close : Icons.call_split,
+                      color: _isSplitMode ? Colors.red : Colors.blue),
+                  label: Text(_isSplitMode ? "Cancel Split" : "Split Transaction",
+                      style: GoogleFonts.inter(
+                          color: _isSplitMode ? Colors.red : Colors.blue)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    side: BorderSide(
+                        color: _isSplitMode ? Colors.red : Colors.blue),
+                  ),
+                ),
               ),
               if (_isSplitMode) ...[
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(16)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text("Add Split Item",
+                              style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.bold, fontSize: 14)),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                                color: remaining > 0.01
+                                    ? Colors.orange.withOpacity(0.1)
+                                    : Colors.green.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8)),
+                            child: Text(
+                                remaining > 0.01
+                                    ? "Remaining: ${FinanceCalculator.formatCurrency(remaining)}"
+                                    : "Fully Split!",
+                                style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: remaining > 0.01
+                                        ? Colors.orange.shade700
+                                        : Colors.green.shade700)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        value: sortedExpenseCategories.contains(_selectedCategory)
+                            ? _selectedCategory
+                            : null,
+                        decoration: InputDecoration(
+                          labelText: 'Category',
+                          isDense: true,
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        items: sortedExpenseCategories
+                            .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                            .toList(),
+                        onChanged: (val) => setState(() {
+                          _selectedCategory = val!;
+                          _selectedSubCategory =
+                              _expenseCategories[_selectedCategory]?.firstOrNull;
+                        }),
+                      ),
+                      const SizedBox(height: 12),
+                      if (sortedSubCategories.isNotEmpty) ...[
+                        DropdownButtonFormField<String>(
+                          value: sortedSubCategories.contains(_selectedSubCategory)
+                              ? _selectedSubCategory
+                              : null,
+                          decoration: InputDecoration(
+                            labelText: 'Sub-Category',
+                            isDense: true,
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                          items: sortedSubCategories
+                              .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                              .toList(),
+                          onChanged: (val) =>
+                              setState(() => _selectedSubCategory = val),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _splitAmountCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: 'Amount',
+                                isDense: true,
+                                prefixText:
+                                    '${FinanceCalculator.getSelectedCurrencySymbol()} ',
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton(
+                            onPressed: _addSplit,
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 14)),
+                            child: const Icon(Icons.add, color: Colors.white),
+                          ),
+                        ],
+                      ),
+                      if (_splitErrorText != null) ...[
+                        const SizedBox(height: 8),
+                        Text(_splitErrorText!,
+                            style:
+                                const TextStyle(color: Colors.red, fontSize: 12)),
+                      ],
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 16),
-                Row(children: [
-                  Expanded(
-                      child: TextField(
-                          controller: _splitAmountCtrl,
-                          decoration:
-                              const InputDecoration(labelText: 'Amount'),
-                          keyboardType: TextInputType.number)),
-                  IconButton(
-                      onPressed: _addSplit, icon: const Icon(Icons.add))
-                ]),
-                if (_splitErrorText != null)
-                  Text(_splitErrorText!,
-                      style: const TextStyle(color: Colors.red)),
-                ..._currentSplits.map((s) => ListTile(
-                    title: Text(s.category),
-                    trailing: Text(s.amount.toStringAsFixed(2))))
+                ..._currentSplits.asMap().entries.map((entry) {
+                  final idx = entry.key;
+                  final s = entry.value;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                        border: Border.all(color: Theme.of(context).dividerColor),
+                        borderRadius: BorderRadius.circular(12)),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(s.category,
+                                  style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.bold, fontSize: 13)),
+                              if (s.subCategory != null &&
+                                  s.subCategory!.isNotEmpty)
+                                Text(s.subCategory!,
+                                    style: GoogleFonts.inter(
+                                        fontSize: 11, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                        Text(FinanceCalculator.formatCurrency(s.amount),
+                            style: GoogleFonts.inter(
+                                fontWeight: FontWeight.bold, fontSize: 13)),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline,
+                              color: Colors.red, size: 20),
+                          onPressed: () => _removeSplit(idx),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
               ]
             ],
 
