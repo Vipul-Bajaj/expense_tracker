@@ -92,11 +92,11 @@ class FinanceCalculator {
   static Map<String, double> calculateBreakdown({
     required List<Transaction> transactions,
     required List<Account> accounts,
-    required bool byCategory,
+    required ReportType reportType,
   }) {
     final Map<String, double> breakdown = {};
     for (var t in transactions) {
-      if (byCategory) {
+      if (reportType == ReportType.category) {
         if (t.type == TransactionType.expense) {
           if (t.splits != null && t.splits!.isNotEmpty) {
             for (var split in t.splits!) {
@@ -113,18 +113,17 @@ class FinanceCalculator {
             breakdown[key] = (breakdown[key] ?? 0) + t.amount;
           }
         } else if (t.type == TransactionType.investment) {
-           // For investments, we can group them under "Investment" or use subcategory
-           String key = t.subCategory != null && t.subCategory!.isNotEmpty
-                ? "Investment - ${t.subCategory}"
-                : "Investment";
-           breakdown[key] = (breakdown[key] ?? 0) + t.amount;
+          String key = t.subCategory != null && t.subCategory!.isNotEmpty
+              ? "Investment - ${t.subCategory}"
+              : "Investment";
+          breakdown[key] = (breakdown[key] ?? 0) + t.amount;
         } else if (t.type == TransactionType.transfer && t.fee > 0) {
           breakdown['Transfer Fees'] =
               (breakdown['Transfer Fees'] ?? 0) + t.fee;
         }
-      } else {
+      } else if (reportType == ReportType.accountType) {
         if (t.type == TransactionType.expense ||
-            t.type == TransactionType.investment || // Include investment
+            t.type == TransactionType.investment ||
             (t.type == TransactionType.transfer && t.fee > 0)) {
           final account = accounts.firstWhere((a) => a.id == t.sourceAccountId,
               orElse: () => Account(
@@ -137,11 +136,17 @@ class FinanceCalculator {
           String key = account.type.name[0].toUpperCase() +
               account.type.name.substring(1);
 
-          double amountToAdd =
-              (t.type == TransactionType.expense || t.type == TransactionType.investment)
-                  ? t.amount
-                  : t.fee;
+          double amountToAdd = (t.type == TransactionType.expense ||
+                  t.type == TransactionType.investment)
+              ? t.amount
+              : t.fee;
           breakdown[key] = (breakdown[key] ?? 0) + amountToAdd;
+        }
+      } else if (reportType == ReportType.transactionType) {
+        String key = t.type.name[0].toUpperCase() + t.type.name.substring(1);
+        double amount = (t.type == TransactionType.transfer) ? t.fee : t.amount;
+        if (amount > 0) {
+          breakdown[key] = (breakdown[key] ?? 0) + amount;
         }
       }
     }
@@ -589,6 +594,8 @@ class ExpenseTrackerApp extends StatelessWidget {
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 
+  static bool _isMigrating = false;
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -611,40 +618,158 @@ class AuthGate extends StatelessWidget {
 
   Future<void> _checkAndRunMigration(String userId) async {
     final settingsBox = Hive.box('settings');
-    bool migrated = settingsBox.get('migrated_investment_v2', defaultValue: false);
+    bool migrated = settingsBox.get('migrated_investment_v3', defaultValue: false);
 
-    if (!migrated) {
+    if (!migrated && !_isMigrating) {
+      _isMigrating = true;
       try {
         final firestore = FirebaseFirestore.instance;
         final userDoc = firestore.collection('users').doc(userId);
         
         // Fetch all transactions
         final snapshot = await userDoc.collection('transactions').get();
-        final batch = firestore.batch();
+        if (snapshot.docs.isEmpty) {
+          await settingsBox.put('migrated_investment_v3', true);
+          return;
+        }
+
         int count = 0;
+        WriteBatch batch = firestore.batch();
+        int batchCount = 0;
 
         for (var doc in snapshot.docs) {
           final data = doc.data();
           final encryptedCategory = data['category'] as String?;
-          final category = encryptedCategory != null ? EncryptionService.decrypt(encryptedCategory) : "";
-          
-          if (data['type'] == TransactionType.expense.index && category == 'Investment') {
+          if (encryptedCategory == null) continue;
+
+          String category = "";
+          try {
+            category = EncryptionService.decrypt(encryptedCategory)
+                .trim()
+                .toLowerCase();
+          } catch (e) {
+            continue;
+          }
+
+          // Robust matching for "Investment" category
+          final isInvestment = category == 'investment' ||
+              category == 'investments' ||
+              category == 'invest' ||
+              category.startsWith('investment -');
+
+          // Match expense type (0) or null
+          final currentType = data['type'];
+          final isExpense = currentType == null ||
+              currentType == TransactionType.expense.index;
+
+          if (isInvestment && isExpense) {
             batch.update(doc.reference, {
-                'type': TransactionType.investment.index,
+              'type': TransactionType.investment.index,
             });
             count++;
+            batchCount++;
+
+            if (batchCount >= 450) {
+              await batch.commit();
+              batch = firestore.batch();
+              batchCount = 0;
+            }
           }
         }
 
-        if (count > 0) {
-            await batch.commit();
-            debugPrint("Migrated $count investment transactions.");
+        if (batchCount > 0) {
+          await batch.commit();
         }
-        
-        await settingsBox.put('migrated_investment_v2', true);
+
+        if (count > 0) {
+          debugPrint("Investments migration: $count items updated.");
+        }
+
+        await settingsBox.put('migrated_investment_v3', true);
       } catch (e) {
-        debugPrint("Migration failed: $e");
+        debugPrint("Investment migration failed: $e");
+      } finally {
+        _isMigrating = false;
       }
+    }
+  }
+
+  static Future<void> runManualMigration(
+      String userId, BuildContext context) async {
+    if (_isMigrating) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Migration already in progress...')),
+        );
+      }
+      return;
+    }
+
+    _isMigrating = true;
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final userDoc = firestore.collection('users').doc(userId);
+
+      final snapshot = await userDoc.collection('transactions').get();
+      int count = 0;
+      WriteBatch batch = firestore.batch();
+      int batchCount = 0;
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final encryptedCategory = data['category'] as String?;
+        if (encryptedCategory == null) continue;
+
+        String category = "";
+        try {
+          category = EncryptionService.decrypt(encryptedCategory)
+              .trim()
+              .toLowerCase();
+        } catch (e) {
+          continue;
+        }
+
+        final isInvestment = category == 'investment' ||
+            category == 'investments' ||
+            category == 'invest' ||
+            category.startsWith('investment -');
+
+        final currentType = data['type'];
+        final isExpense =
+            currentType == null || currentType == TransactionType.expense.index;
+
+        if (isInvestment && isExpense) {
+          batch.update(doc.reference, {
+            'type': TransactionType.investment.index,
+          });
+          count++;
+          batchCount++;
+
+          if (batchCount >= 450) {
+            await batch.commit();
+            batch = firestore.batch();
+            batchCount = 0;
+          }
+        }
+      }
+
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Migrated $count investment items.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Migration failed: $e')),
+        );
+      }
+    } finally {
+      _isMigrating = false;
     }
   }
 }
@@ -1579,6 +1704,34 @@ class _DashboardTabState extends State<DashboardTab> {
                           },
                         ),
                       ),
+                      ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 4),
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                              color: Colors.purple.shade50,
+                              borderRadius: BorderRadius.circular(8)),
+                          child: Icon(Icons.auto_fix_high,
+                              color: Colors.purple.shade600),
+                        ),
+                        title: Text('Fix Investment Types',
+                            style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context).colorScheme.onSurface)),
+                        subtitle: Text('Correct old investment entries',
+                            style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        onTap: () async {
+                          final user = AuthService.currentUser;
+                          if (user != null) {
+                            await AuthGate.runManualMigration(
+                                user.uid, context);
+                          }
+                        },
+                      ),
                     ],
                   );
                 }),
@@ -1659,8 +1812,10 @@ class _DashboardTabState extends State<DashboardTab> {
         FinanceCalculator.calculateIncome(monthlyTransactions);
     final double monthlyExpense =
         FinanceCalculator.calculateExpense(monthlyTransactions);
+    final double monthlyInvestment =
+        FinanceCalculator.calculateInvestment(monthlyTransactions);
 
-    final double monthlyTotal = monthlyIncome - monthlyExpense;
+    final double monthlyTotal = monthlyIncome - monthlyExpense - monthlyInvestment;
 
     return Scaffold(
       appBar: AppBar(
@@ -1779,9 +1934,9 @@ class _DashboardTabState extends State<DashboardTab> {
                         Row(
                           children: [
                             const Icon(Icons.arrow_upward,
-                                size: 16, color: Colors.red),
+                                size: 16, color: Colors.orange),
                             const SizedBox(width: 4),
-                            Text('Expense',
+                            Text('Outflow',
                                 style: GoogleFonts.inter(
                                     fontSize: 12,
                                     color: Theme.of(context)
@@ -1789,11 +1944,18 @@ class _DashboardTabState extends State<DashboardTab> {
                                         .onSurfaceVariant)),
                           ],
                         ),
-                        Text(FinanceCalculator.formatCurrency(monthlyExpense),
+                        Text(FinanceCalculator.formatCurrency(monthlyExpense + monthlyInvestment),
                             style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.red)),
+                                color: Colors.orange)),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Exp: ${FinanceCalculator.formatCurrency(monthlyExpense)} • Inv: ${FinanceCalculator.formatCurrency(monthlyInvestment)}',
+                          style: GoogleFonts.inter(
+                              fontSize: 9,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7)),
+                        ),
                       ],
                     ),
                   ],
@@ -2562,7 +2724,7 @@ class ReportsTab extends StatefulWidget {
   State<ReportsTab> createState() => _ReportsTabState();
 }
 
-enum ReportType { category, accountType }
+enum ReportType { category, accountType, transactionType }
 
 class _ReportsTabState extends State<ReportsTab> {
   DateTime _currentMonth = DateTime.now();
@@ -2574,6 +2736,39 @@ class _ReportsTabState extends State<ReportsTab> {
       _currentMonth =
           DateTime(_currentMonth.year, _currentMonth.month + offset);
     });
+  }
+
+  Widget _buildToggleButton(String label, ReportType type) {
+    bool isSelected = _reportType == type;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _reportType = type),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 2)
+                  ]
+                : [],
+          ),
+          alignment: Alignment.center,
+          child: Text(label,
+              style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.onPrimaryContainer
+                      : Theme.of(context).colorScheme.onSurfaceVariant)),
+        ),
+      ),
+    );
   }
 
   Future<void> _exportData() async {
@@ -2675,7 +2870,7 @@ class _ReportsTabState extends State<ReportsTab> {
     final Map<String, double> breakdown = FinanceCalculator.calculateBreakdown(
       transactions: monthlyTransactions,
       accounts: widget.accounts,
-      byCategory: _reportType == ReportType.category,
+      reportType: _reportType,
     );
     final sortedBreakdown = Map.fromEntries(
         breakdown.entries.toList()..sort((a, b) => b.value.compareTo(a.value)));
@@ -2781,74 +2976,9 @@ class _ReportsTabState extends State<ReportsTab> {
             ),
             child: Row(
               children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () =>
-                        setState(() => _reportType = ReportType.category),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: _reportType == ReportType.category
-                            ? Theme.of(context).colorScheme.primaryContainer
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: _reportType == ReportType.category
-                            ? [
-                                BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 2)
-                              ]
-                            : [],
-                      ),
-                      alignment: Alignment.center,
-                      child: Text("By Category",
-                          style: GoogleFonts.inter(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: _reportType == ReportType.category
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .onPrimaryContainer
-                                  : Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant)),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () =>
-                        setState(() => _reportType = ReportType.accountType),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: _reportType == ReportType.accountType
-                            ? Theme.of(context).colorScheme.primaryContainer
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: _reportType == ReportType.accountType
-                            ? [
-                                BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 2)
-                              ]
-                            : [],
-                      ),
-                      alignment: Alignment.center,
-                      child: Text("By Account Type",
-                          style: GoogleFonts.inter(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: _reportType == ReportType.accountType
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .onPrimaryContainer
-                                  : Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant)),
-                    ),
-                  ),
-                ),
+                _buildToggleButton("By Category", ReportType.category),
+                _buildToggleButton("By Account", ReportType.accountType),
+                _buildToggleButton("By Type", ReportType.transactionType),
               ],
             ),
           ),
@@ -2937,7 +3067,9 @@ class _ReportsTabState extends State<ReportsTab> {
             Text(
                 _reportType == ReportType.category
                     ? 'CATEGORY BREAKDOWN'
-                    : 'ACCOUNT TYPE BREAKDOWN',
+                    : _reportType == ReportType.accountType
+                        ? 'ACCOUNT TYPE BREAKDOWN'
+                        : 'TRANSACTION TYPE BREAKDOWN',
                 style: GoogleFonts.inter(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -2949,9 +3081,13 @@ class _ReportsTabState extends State<ReportsTab> {
               decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(20)),
-              child: _isPieChart
-                  ? _buildPieChart(sortedBreakdown, monthlyExpense)
-                  : _buildBarList(sortedBreakdown, monthlyExpense),
+              child: (() {
+                final total =
+                    sortedBreakdown.values.fold(0.0, (sum, val) => sum + val);
+                return _isPieChart
+                    ? _buildPieChart(sortedBreakdown, total)
+                    : _buildBarList(sortedBreakdown, total);
+              })(),
             ),
           ] else
             Center(
