@@ -2518,7 +2518,7 @@ class AccountsTab extends StatelessWidget {
     for (var t in accountTxns) {
       if (t.type == TransactionType.income) {
         totalCredit += t.amount;
-      } else if (t.type == TransactionType.expense) {
+      } else if (t.type == TransactionType.expense || t.type == TransactionType.investment) {
         totalDebit += t.amount;
       } else if (t.type == TransactionType.transfer) {
         if (t.sourceAccountId == account.id) {
