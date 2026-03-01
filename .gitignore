@@ -109,6 +109,7 @@ modules.xml
 android/local.properties
 *.keystore
 *.jks
+key.properties
 *.priv
 *.pub
 

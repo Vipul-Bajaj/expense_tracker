@@ -467,6 +467,41 @@ class AuthService {
     await _googleSignIn.signOut();
     await _auth.signOut();
   }
+
+  static Future<void> deleteUserData() async {
+    final user = currentUser;
+    if (user == null) return;
+
+    final firestore = FirebaseFirestore.instance;
+    final userDoc = firestore.collection('users').doc(user.uid);
+
+    // Delete sub-collections (accounts, transactions, settings)
+    // Note: Firestore doesn't delete sub-collections automatically when parent is deleted.
+    
+    // 1. Delete transactions
+    final txns = await userDoc.collection('transactions').get();
+    for (var doc in txns.docs) {
+      await doc.reference.delete();
+    }
+
+    // 2. Delete accounts
+    final accs = await userDoc.collection('accounts').get();
+    for (var doc in accs.docs) {
+      await doc.reference.delete();
+    }
+
+    // 3. Delete category settings
+    final settings = await userDoc.collection('settings').get();
+    for (var doc in settings.docs) {
+      await doc.reference.delete();
+    }
+
+    // 4. Delete user document itself
+    await userDoc.delete();
+
+    // Finally sign out
+    await signOut();
+  }
 }
 
 // --- MAIN ENTRY POINT ---
@@ -1435,6 +1470,50 @@ class _DashboardTabState extends State<DashboardTab> {
     }
   }
 
+  void _deleteAccountData(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete All Data?',
+            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        content: Text(
+            'This will permanently delete all your transactions, accounts, and settings. This action cannot be undone.',
+            style: GoogleFonts.inter()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.inter(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              // Show loading overlay
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+              
+              await AuthService.deleteUserData();
+              
+              if (mounted) {
+                Navigator.pop(context); // Close loading
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("All data deleted successfully")),
+                );
+              }
+            },
+            child: Text('Delete Everything',
+                style: GoogleFonts.inter(
+                    color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showProfileOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -1704,34 +1783,6 @@ class _DashboardTabState extends State<DashboardTab> {
                           },
                         ),
                       ),
-                      ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
-                        leading: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                              color: Colors.purple.shade50,
-                              borderRadius: BorderRadius.circular(8)),
-                          child: Icon(Icons.auto_fix_high,
-                              color: Colors.purple.shade600),
-                        ),
-                        title: Text('Fix Investment Types',
-                            style: GoogleFonts.inter(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurface)),
-                        subtitle: Text('Correct old investment entries',
-                            style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        onTap: () async {
-                          final user = AuthService.currentUser;
-                          if (user != null) {
-                            await AuthGate.runManualMigration(
-                                user.uid, context);
-                          }
-                        },
-                      ),
                     ],
                   );
                 }),
@@ -1787,6 +1838,33 @@ class _DashboardTabState extends State<DashboardTab> {
                   onTap: () {
                     Navigator.pop(ctx);
                     _signOut(context);
+                  },
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                const SizedBox(height: 8),
+
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Icon(Icons.delete_forever, color: Colors.red.shade600),
+                  ),
+                  title: Text('Delete All Data',
+                      style: GoogleFonts.inter(
+                          fontSize: 16,
+                          color: Colors.red.shade700,
+                          fontWeight: FontWeight.w600)),
+                  subtitle: Text('Irreversibly wipe all account records',
+                      style: GoogleFonts.inter(
+                          fontSize: 12, color: Colors.red.shade300)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _deleteAccountData(context);
                   },
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
@@ -2781,7 +2859,18 @@ class _ReportsTabState extends State<ReportsTab> {
       StringBuffer csv = StringBuffer();
       csv.writeln(
           "Date,Type,Category,SubCategory,Amount,Fee,Source Account,Target Account,Splits/Notes");
-      for (var t in widget.transactions) {
+      final filteredTransactions = widget.transactions.where((t) {
+        return t.date.year == _currentMonth.year &&
+            t.date.month == _currentMonth.month;
+      }).toList();
+
+      if (filteredTransactions.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("No data to export for the selected month")));
+        return;
+      }
+
+      for (var t in filteredTransactions) {
         String date = DateFormat('yyyy-MM-dd').format(t.date);
         String type = t.type.name[0].toUpperCase() + t.type.name.substring(1);
         String category = t.category.replaceAll(',', ' ');
