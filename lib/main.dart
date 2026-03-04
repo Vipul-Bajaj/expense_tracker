@@ -101,9 +101,9 @@ class FinanceCalculator {
           if (t.splits != null && t.splits!.isNotEmpty) {
             for (var split in t.splits!) {
               String key =
-                  split.subCategory != null && split.subCategory!.isNotEmpty
-                      ? "${split.category} - ${split.subCategory}"
-                      : split.category;
+              split.subCategory != null && split.subCategory!.isNotEmpty
+                  ? "${split.category} - ${split.subCategory}"
+                  : split.category;
               breakdown[key] = (breakdown[key] ?? 0) + split.amount;
             }
           } else {
@@ -137,7 +137,7 @@ class FinanceCalculator {
               account.type.name.substring(1);
 
           double amountToAdd = (t.type == TransactionType.expense ||
-                  t.type == TransactionType.investment)
+              t.type == TransactionType.investment)
               ? t.amount
               : t.fee;
           breakdown[key] = (breakdown[key] ?? 0) + amountToAdd;
@@ -233,9 +233,9 @@ class MonthlyData {
 
   MonthlyData(
       {required this.month,
-      required this.income,
-      required this.expense,
-      this.investment = 0});
+        required this.income,
+        required this.expense,
+        this.investment = 0});
 }
 
 // --- 1. Data Models & Adapters ---
@@ -264,6 +264,7 @@ class Account {
   final int id;
   final String name;
   double balance;
+  double initialBalance;
   final AccountType type;
   final DateTime createdDate;
 
@@ -271,6 +272,7 @@ class Account {
     required this.id,
     required this.name,
     required this.balance,
+    this.initialBalance = 0.0,
     required this.type,
     required this.createdDate,
   });
@@ -280,6 +282,7 @@ class Account {
       'id': id,
       'name': EncryptionService.encrypt(name),
       'balance': EncryptionService.encryptDouble(balance),
+      'initialBalance': EncryptionService.encryptDouble(initialBalance),
       'type': type.index,
       'createdDate': Timestamp.fromDate(createdDate),
     };
@@ -290,6 +293,9 @@ class Account {
       id: map['id'],
       name: EncryptionService.decrypt(map['name']),
       balance: EncryptionService.decryptDouble(map['balance']),
+      initialBalance: map.containsKey('initialBalance')
+          ? EncryptionService.decryptDouble(map['initialBalance'])
+          : 0.0,
       type: AccountType.values[map['type']],
       createdDate: (map['createdDate'] as Timestamp).toDate(),
     );
@@ -335,7 +341,7 @@ class TransactionSplit {
       'amount': EncryptionService.encryptDouble(amount),
       'category': EncryptionService.encrypt(category),
       'subCategory':
-          subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
+      subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
     };
   }
 
@@ -389,7 +395,7 @@ class Transaction {
       'targetAccountId': targetAccountId,
       'category': EncryptionService.encrypt(category),
       'subCategory':
-          subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
+      subCategory != null ? EncryptionService.encrypt(subCategory!) : null,
       'date': Timestamp.fromDate(date),
       'splits': splits?.map((s) => s.toMap()).toList(),
       'note': note != null ? EncryptionService.encrypt(note!) : null,
@@ -412,8 +418,8 @@ class Transaction {
       date: (map['date'] as Timestamp).toDate(),
       splits: map['splits'] != null
           ? (map['splits'] as List)
-              .map((s) => TransactionSplit.fromMap(s))
-              .toList()
+          .map((s) => TransactionSplit.fromMap(s))
+          .toList()
           : null,
       note: map['note'] != null ? EncryptionService.decrypt(map['note']) : null,
       recurrence: map['recurrence'] != null
@@ -441,7 +447,7 @@ class AuthService {
       googleProvider.setCustomParameters({'prompt': 'select_account'});
 
       final UserCredential userCredential =
-          await _auth.signInWithPopup(googleProvider);
+      await _auth.signInWithPopup(googleProvider);
       return userCredential.user;
     }
 
@@ -451,7 +457,7 @@ class AuthService {
     if (googleUser == null) return null;
 
     final GoogleSignInAuthentication googleAuth =
-        await googleUser.authentication;
+    await googleUser.authentication;
 
     final OAuthCredential credential = GoogleAuthProvider.credential(
       accessToken: googleAuth.accessToken,
@@ -459,7 +465,7 @@ class AuthService {
     );
 
     final UserCredential userCredential =
-        await _auth.signInWithCredential(credential);
+    await _auth.signInWithCredential(credential);
     return userCredential.user;
   }
 
@@ -477,7 +483,7 @@ class AuthService {
 
     // Delete sub-collections (accounts, transactions, settings)
     // Note: Firestore doesn't delete sub-collections automatically when parent is deleted.
-    
+
     // 1. Delete transactions
     final txns = await userDoc.collection('transactions').get();
     for (var doc in txns.docs) {
@@ -530,46 +536,6 @@ void main() async {
   await Hive.openBox('settings');
   final expensesBox = await Hive.openBox('expenses_db');
 
-  // Migration: Convert Expense with category "Investment" to TransactionType.investment
-  // Check if we have transactions stored. Assuming they are in 'expenses_db' under some key or if the box IS the list (unlikely for a named box 'expenses_db' usually stores key-value pairs).
-  // However, looking at the code, it seems the app might be using Firebase mostly?
-  // But wait, TransactionAdapter is registered, so Hive IS used for storage.
-  // The original code opened 'expenses_db'.
-  // If the previous code was `await Hive.openBox('expenses_db');`, then that's the box.
-  
-  // Let's assume transactions are stored in 'transactions' box IF the user requested me to change it before? 
-  // But the diff showed I replaced 'expenses_db'.
-  // So likely the data IS in 'expenses_db'.
-  // But I need to know the KEY for transactions in 'expenses_db'.
-  // OR the app uses a box named 'transactions'?
-  // Actually, I should just revert to opening 'expenses_db' and then check if 'transactions' box was used elsewhere.
-  // If the app relies on Firebase, maybe Hive is just for local cache or settings?
-  // But TransactionTypeAdapter is for Hive.
-  
-  // Let's revert the box opening to original state + add migration if applicable.
-  // If I don't know where transactions are, I shouldn't blindly run migration on a new box 'transactions'.
-  
-  // Wait, I saw earlier `AuthService.currentUser`. The app seems to use Firebase.
-  // `_deleteTransaction` used `FirebaseFirestore.instance`.
-  // So the primary storage is Firebase!
-  // The Hive adapters might be for offline support or I am misinterpreting.
-  // Implementation Plan said: "Add "Investment" as a new TransactionType... Update the TransactionTypeAdapter...".
-  // If the app uses Firebase, I need to migrate data in FIREBASE, not Hive (unless Hive is the source of truth).
-  
-  // RE-READING `_deleteTransaction` in step 209:
-  // final userDoc = firestore.collection('users').doc(user.uid);
-  // userDoc.collection('transactions').doc(id).delete();
-  
-  // The app uses FIRESTORE for transactions.
-  // My Hive migration logic is WRONG/USELESS if data is in Firestore.
-  // I should remove the Hive migration code and instead implement a Firestore migration
-  // OR provide a UI button to "Migrate Data" that runs the Firestore migration.
-  // A startup migration is also possible but needs to handle async Firestore calls.
-  
-  // I will revert the Hive changes in main() to avoid breaking local cache/settings.
-  // And I will NOT add Hive migration.
-  // I will instead add a "Migrate Investments" button in the Settings or a one-time check in HomePage.
-  
   runApp(const ExpenseTrackerApp());
 }
 
@@ -583,7 +549,7 @@ class ExpenseTrackerApp extends StatelessWidget {
       builder: (context, box, _) {
         final themeModeName = box.get('themeMode', defaultValue: 'system');
         final ThemeMode themeMode = ThemeMode.values.firstWhere(
-          (t) => t.name == themeModeName,
+              (t) => t.name == themeModeName,
           orElse: () => ThemeMode.system,
         );
 
@@ -638,7 +604,7 @@ class AuthGate extends StatelessWidget {
       builder: (context, snapshot) {
         // If we are waiting for auth state, show a simple loading or splash
         if (snapshot.connectionState == ConnectionState.waiting) {
-           return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
 
         if (snapshot.hasData) {
@@ -660,7 +626,7 @@ class AuthGate extends StatelessWidget {
       try {
         final firestore = FirebaseFirestore.instance;
         final userDoc = firestore.collection('users').doc(userId);
-        
+
         // Fetch all transactions
         final snapshot = await userDoc.collection('transactions').get();
         if (snapshot.docs.isEmpty) {
@@ -841,7 +807,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       // Check for Biometric Lock
       final box = Hive.box('settings');
       final bool isBiometricEnabled =
-          box.get('isBiometricEnabled', defaultValue: false);
+      box.get('isBiometricEnabled', defaultValue: false);
 
       if (isBiometricEnabled) {
         final bool authenticated = await BiometricAuthService.authenticate();
@@ -959,7 +925,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           message = "This operation is restricted. Check Firebase Console.";
         } else if (message.contains('firebase_auth/unauthorized-domain')) {
           message =
-              "Domain not authorized. Check Firebase Console > Auth > Settings.";
+          "Domain not authorized. Check Firebase Console > Auth > Settings.";
         } else if (message.contains('popup-closed-by-user')) {
           message = "Sign-in popup closed before completion.";
         }
@@ -1054,7 +1020,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                                     .onSurfaceVariant)),
                         style: OutlinedButton.styleFrom(
                           side:
-                              BorderSide(color: Theme.of(context).dividerColor),
+                          BorderSide(color: Theme.of(context).dividerColor),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16)),
                         ),
@@ -1116,7 +1082,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
             nextDueDate = nextDueDate.add(const Duration(days: 7));
             break;
           case RecurrenceFrequency.monthly:
-            // Handle month overflow carefully
+          // Handle month overflow carefully
             int newMonth = nextDueDate.month + 1;
             int newYear = nextDueDate.year;
             if (newMonth > 12) {
@@ -1129,7 +1095,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
             nextDueDate = DateTime(newYear, newMonth, newDay);
             break;
           case RecurrenceFrequency.yearly:
-            // Handle leap years
+          // Handle leap years
             if (txn.date.month == 2 && txn.date.day == 29) {
               // Check if next year is leap year, if not use 28th
               final isLeap = (nextDueDate.year + 1) % 4 == 0 &&
@@ -1151,7 +1117,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
         // Check if a transaction already exists for this recurrence on this specific date
         // Logic: Same Category, Amount, Type, and Date (Year, Month, Day)
         bool exists = transactions.any((t) =>
-            t.amount == txn.amount &&
+        t.amount == txn.amount &&
             t.category == txn.category &&
             t.type == txn.type &&
             t.date.year == nextDueDate.year &&
@@ -1177,7 +1143,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
             splits: txn.splits,
             note: "${txn.note ?? ''} (Recurring)",
             recurrence:
-                RecurrenceFrequency.none, // New instance is not the parent
+            RecurrenceFrequency.none, // New instance is not the parent
           );
 
           // Add to batch
@@ -1250,22 +1216,22 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
       Future.microtask(() {
         Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-            (route) => false);
+                (route) => false);
       });
       return const SizedBox();
     }
 
     final userDocRef =
-        FirebaseFirestore.instance.collection('users').doc(user.uid);
+    FirebaseFirestore.instance.collection('users').doc(user.uid);
 
     return StreamBuilder<QuerySnapshot>(
       stream: userDocRef.collection('accounts').snapshots(),
       builder: (context, accountsSnapshot) {
         final List<Account> accounts = accountsSnapshot.hasData
             ? accountsSnapshot.data!.docs
-                .map((doc) =>
-                    Account.fromMap(doc.data() as Map<String, dynamic>))
-                .toList()
+            .map((doc) =>
+            Account.fromMap(doc.data() as Map<String, dynamic>))
+            .toList()
             : [];
 
         return StreamBuilder<QuerySnapshot>(
@@ -1273,9 +1239,9 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
           builder: (context, transactionsSnapshot) {
             final List<Transaction> transactions = transactionsSnapshot.hasData
                 ? transactionsSnapshot.data!.docs
-                    .map((doc) =>
-                        Transaction.fromMap(doc.data() as Map<String, dynamic>))
-                    .toList()
+                .map((doc) =>
+                Transaction.fromMap(doc.data() as Map<String, dynamic>))
+                .toList()
                 : [];
 
             // Check for recurring transactions once data is loaded
@@ -1325,7 +1291,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                     categoriesSnapshot.data != null &&
                     categoriesSnapshot.data!.exists) {
                   final data =
-                      categoriesSnapshot.data!.data() as Map<String, dynamic>;
+                  categoriesSnapshot.data!.data() as Map<String, dynamic>;
                   if (data.containsKey('data')) {
                     categories = (data['data'] as Map).map((k, v) => MapEntry(
                         k.toString(),
@@ -1357,9 +1323,9 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                         currentIndex: _currentIndex,
                         onTap: (idx) => setState(() => _currentIndex = idx),
                         selectedItemColor:
-                            Theme.of(context).colorScheme.primary,
+                        Theme.of(context).colorScheme.primary,
                         unselectedItemColor:
-                            Theme.of(context).colorScheme.onSurfaceVariant,
+                        Theme.of(context).colorScheme.onSurfaceVariant,
                         showUnselectedLabels: true,
                         type: BottomNavigationBarType.fixed,
                         items: const [
@@ -1387,26 +1353,26 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                       ),
                       floatingActionButton: _currentIndex == 0
                           ? FloatingActionButton(
-                              onPressed: () {
-                                if (accounts.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content: Text(
-                                              'Please add an account first (Accounts Tab)!'),
-                                          backgroundColor: Colors.red));
-                                  return;
-                                }
-                                showModalBottomSheet(
-                                  context: context,
-                                  isScrollControlled: true,
-                                  backgroundColor: Colors.transparent,
-                                  builder: (_) =>
-                                      AddTransactionSheet(accounts: accounts),
-                                );
-                              },
-                              backgroundColor: const Color(0xFF2563EB),
-                              child: const Icon(Icons.add, color: Colors.white),
-                            )
+                        onPressed: () {
+                          if (accounts.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Please add an account first (Accounts Tab)!'),
+                                    backgroundColor: Colors.red));
+                            return;
+                          }
+                          showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (_) =>
+                                AddTransactionSheet(accounts: accounts),
+                          );
+                        },
+                        backgroundColor: const Color(0xFF2563EB),
+                        child: const Icon(Icons.add, color: Colors.white),
+                      )
                           : null,
                     );
                   },
@@ -1449,7 +1415,7 @@ class _DashboardTabState extends State<DashboardTab> {
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-        (route) => false,
+            (route) => false,
       );
     }
   }
@@ -1465,7 +1431,7 @@ class _DashboardTabState extends State<DashboardTab> {
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-        (route) => false,
+            (route) => false,
       );
     }
   }
@@ -1495,9 +1461,9 @@ class _DashboardTabState extends State<DashboardTab> {
                   child: CircularProgressIndicator(),
                 ),
               );
-              
+
               await AuthService.deleteUserData();
-              
+
               if (mounted) {
                 Navigator.pop(context); // Close loading
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -1508,6 +1474,119 @@ class _DashboardTabState extends State<DashboardTab> {
             child: Text('Delete Everything',
                 style: GoogleFonts.inter(
                     color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _reSyncData(BuildContext context) async {
+    final user = AuthService.currentUser;
+    if (user == null) return;
+
+    // Show loading overlay
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final userDoc = firestore.collection('users').doc(user.uid);
+
+      // Fetch all accounts and transactions
+      final accountsSnap = await userDoc.collection('accounts').get();
+      final transactionsSnap = await userDoc.collection('transactions').get();
+
+      Map<int, double> recalculatedBalances = {};
+
+      // 1. Initialize all account balances to their Opening Balances
+      for (var doc in accountsSnap.docs) {
+        final data = doc.data();
+        final id = data['id'] as int;
+        final double initialBal = data.containsKey('initialBalance')
+            ? EncryptionService.decryptDouble(data['initialBalance'])
+            : 0.0;
+        recalculatedBalances[id] = initialBal;
+      }
+
+      // 2. Recompute balances strictly from transactions
+      for (var doc in transactionsSnap.docs) {
+        final data = doc.data();
+        final t = Transaction.fromMap(data);
+
+        if (recalculatedBalances.containsKey(t.sourceAccountId)) {
+          if (t.type == TransactionType.income) {
+            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! + t.amount;
+          } else if (t.type == TransactionType.expense || t.type == TransactionType.investment) {
+            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! - t.amount;
+          } else if (t.type == TransactionType.transfer) {
+            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! - (t.amount + t.fee);
+          }
+        }
+
+        if (t.type == TransactionType.transfer && t.targetAccountId != null) {
+          if (recalculatedBalances.containsKey(t.targetAccountId)) {
+            recalculatedBalances[t.targetAccountId!] = recalculatedBalances[t.targetAccountId!]! + t.amount;
+          }
+        }
+      }
+
+      // 3. Update Firestore with new accurate balances
+      final batch = firestore.batch();
+      for (var doc in accountsSnap.docs) {
+        final data = doc.data();
+        final id = data['id'] as int;
+        if (recalculatedBalances.containsKey(id)) {
+          batch.update(doc.reference, {
+            'balance': EncryptionService.encryptDouble(recalculatedBalances[id]!)
+          });
+        }
+      }
+
+      await batch.commit();
+
+      if (context.mounted) {
+        Navigator.pop(context); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Data re-synced successfully!")),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error re-syncing data: $e")),
+        );
+      }
+    }
+  }
+
+  void _promptReSync(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Re-sync Data',
+            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        content: Text(
+            'This will recalculate all your account balances from scratch using your transaction history and Opening Balances.\n\n⚠️ IMPORTANT: If your account had a starting balance but you didn\'t explicitly set an "Opening Balance" for it yet, please cancel this, go to the Accounts tab, long-press your account to edit it, and set your Opening Balance first.',
+            style: GoogleFonts.inter(fontSize: 14)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.inter(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _reSyncData(context);
+            },
+            child: Text('Re-sync Data',
+                style: GoogleFonts.inter(
+                    color: Colors.teal, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1547,10 +1626,10 @@ class _DashboardTabState extends State<DashboardTab> {
                         : null,
                     child: _user!.photoURL == null
                         ? Text(_user!.displayName?[0] ?? "U",
-                            style: GoogleFonts.inter(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue.shade700))
+                        style: GoogleFonts.inter(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700))
                         : null,
                   ),
                   const SizedBox(height: 16),
@@ -1576,10 +1655,10 @@ class _DashboardTabState extends State<DashboardTab> {
                 StatefulBuilder(builder: (context, setSheetState) {
                   final box = Hive.box('settings');
                   bool isEnabled =
-                      box.get('isBiometricEnabled', defaultValue: false);
+                  box.get('isBiometricEnabled', defaultValue: false);
                   return ListTile(
                     contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -1610,7 +1689,7 @@ class _DashboardTabState extends State<DashboardTab> {
                         if (val) {
                           // Verify biometrics before enabling
                           bool canCheck =
-                              await BiometricAuthService.canCheckBiometrics();
+                          await BiometricAuthService.canCheckBiometrics();
                           if (!canCheck) {
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -1622,7 +1701,7 @@ class _DashboardTabState extends State<DashboardTab> {
                             return;
                           }
                           bool authenticated =
-                              await BiometricAuthService.authenticate();
+                          await BiometricAuthService.authenticate();
                           if (authenticated) {
                             await box.put('isBiometricEnabled', true);
                             setSheetState(() {});
@@ -1640,11 +1719,11 @@ class _DashboardTabState extends State<DashboardTab> {
                 StatefulBuilder(builder: (context, setSheetState) {
                   final box = Hive.box('settings');
                   String currentCurrency =
-                      box.get('currency', defaultValue: 'inr');
+                  box.get('currency', defaultValue: 'inr');
 
                   final currencyListTile = ListTile(
                     contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -1684,11 +1763,11 @@ class _DashboardTabState extends State<DashboardTab> {
                   );
 
                   String currentThemeMode =
-                      box.get('themeMode', defaultValue: 'system');
+                  box.get('themeMode', defaultValue: 'system');
 
                   final themeListTile = ListTile(
                     contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -1698,8 +1777,8 @@ class _DashboardTabState extends State<DashboardTab> {
                           currentThemeMode == 'dark'
                               ? Icons.dark_mode_outlined
                               : (currentThemeMode == 'light'
-                                  ? Icons.light_mode_outlined
-                                  : Icons.brightness_auto_outlined),
+                              ? Icons.light_mode_outlined
+                              : Icons.brightness_auto_outlined),
                           color: Colors.purple.shade600),
                     ),
                     title: Text('App Theme',
@@ -1751,7 +1830,7 @@ class _DashboardTabState extends State<DashboardTab> {
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
                                 color:
-                                    Theme.of(context).colorScheme.onSurface)),
+                                Theme.of(context).colorScheme.onSurface)),
                         subtitle: Text(
                             'Last updated: ${CurrencyService.getLastUpdatedText()}',
                             style: GoogleFonts.inter(
@@ -1769,7 +1848,7 @@ class _DashboardTabState extends State<DashboardTab> {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                       content:
-                                          Text('Rates updated successfully')),
+                                      Text('Rates updated successfully')),
                                 );
                               }
                             } else {
@@ -1788,10 +1867,39 @@ class _DashboardTabState extends State<DashboardTab> {
                 }),
                 const SizedBox(height: 8),
 
+                ListTile(
+                  contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: Colors.teal.shade50,
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Icon(Icons.sync_problem, color: Colors.teal.shade600),
+                  ),
+                  title: Text('Re-sync Data',
+                      style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface)),
+                  subtitle: Text('Recompute balances from history',
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  onTap: () {
+                    Navigator.pop(ctx); // Close the bottom sheet
+                    _promptReSync(context); // Open prompt
+                  },
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+
+                const SizedBox(height: 8),
+
                 // Enhanced Switch Account Option
                 ListTile(
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
@@ -1809,7 +1917,7 @@ class _DashboardTabState extends State<DashboardTab> {
                       style: GoogleFonts.inter(
                           fontSize: 12,
                           color:
-                              Theme.of(context).colorScheme.onSurfaceVariant)),
+                          Theme.of(context).colorScheme.onSurfaceVariant)),
                   onTap: () {
                     Navigator.pop(ctx);
                     _switchAccount(context);
@@ -1822,7 +1930,7 @@ class _DashboardTabState extends State<DashboardTab> {
 
                 ListTile(
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
@@ -1846,7 +1954,7 @@ class _DashboardTabState extends State<DashboardTab> {
 
                 ListTile(
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
@@ -1887,11 +1995,11 @@ class _DashboardTabState extends State<DashboardTab> {
     monthlyTransactions.sort((a, b) => b.date.compareTo(a.date));
 
     final double monthlyIncome =
-        FinanceCalculator.calculateIncome(monthlyTransactions);
+    FinanceCalculator.calculateIncome(monthlyTransactions);
     final double monthlyExpense =
-        FinanceCalculator.calculateExpense(monthlyTransactions);
+    FinanceCalculator.calculateExpense(monthlyTransactions);
     final double monthlyInvestment =
-        FinanceCalculator.calculateInvestment(monthlyTransactions);
+    FinanceCalculator.calculateInvestment(monthlyTransactions);
 
     final double monthlyTotal = monthlyIncome - monthlyExpense - monthlyInvestment;
 
@@ -1919,7 +2027,7 @@ class _DashboardTabState extends State<DashboardTab> {
                       : null,
                   child: _user!.photoURL == null
                       ? Icon(Icons.person,
-                          size: 20, color: Colors.blue.shade700)
+                      size: 20, color: Colors.blue.shade700)
                       : null,
                 ),
               ),
@@ -2135,7 +2243,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
         if (_selectedCategory != null &&
             widget.categories[_selectedCategory] != null) {
           sortedSubCategories =
-              List<String>.from(widget.categories[_selectedCategory]!)..sort();
+          List<String>.from(widget.categories[_selectedCategory]!)..sort();
         }
 
         return Container(
@@ -2171,21 +2279,21 @@ class _TransactionsTabState extends State<TransactionsTab> {
                 ],
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<TransactionType>(
+              DropdownButtonFormField<TransactionType?>(
                 value: _selectedType,
                 decoration: InputDecoration(
                   labelText: "Type",
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 items: [
-                  const DropdownMenuItem(value: null, child: Text("All Types")),
-                  ...TransactionType.values.map((t) => DropdownMenuItem(
+                  const DropdownMenuItem<TransactionType?>(value: null, child: Text("All Types")),
+                  ...TransactionType.values.map((t) => DropdownMenuItem<TransactionType?>(
                       value: t,
                       child:
-                          Text(t.name[0].toUpperCase() + t.name.substring(1)))),
+                      Text(t.name[0].toUpperCase() + t.name.substring(1)))),
                 ],
                 onChanged: (val) {
                   setModalState(() => _selectedType = val);
@@ -2193,20 +2301,20 @@ class _TransactionsTabState extends State<TransactionsTab> {
                 },
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<int>(
+              DropdownButtonFormField<int?>(
                 value: _selectedAccountId,
                 decoration: InputDecoration(
                   labelText: "Account",
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 items: [
-                  const DropdownMenuItem(
+                  const DropdownMenuItem<int?>(
                       value: null, child: Text("All Accounts")),
                   ...sortedAccounts.map((a) =>
-                      DropdownMenuItem(value: a.id, child: Text(a.name))),
+                      DropdownMenuItem<int?>(value: a.id, child: Text(a.name))),
                 ],
                 onChanged: (val) {
                   setModalState(() => _selectedAccountId = val);
@@ -2214,21 +2322,21 @@ class _TransactionsTabState extends State<TransactionsTab> {
                 },
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
+              DropdownButtonFormField<String?>(
                 value: _selectedCategory,
                 decoration: InputDecoration(
                   labelText: "Category",
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12)),
                   contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 isExpanded: true,
                 items: [
-                  const DropdownMenuItem(
+                  const DropdownMenuItem<String?>(
                       value: null, child: Text("All Categories")),
                   ...sortedCategories
-                      .map((c) => DropdownMenuItem(value: c, child: Text(c))),
+                      .map((c) => DropdownMenuItem<String?>(value: c, child: Text(c))),
                 ],
                 onChanged: (val) {
                   setModalState(() {
@@ -2243,7 +2351,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
               ),
               if (_selectedCategory != null && sortedSubCategories != null) ...[
                 const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
+                DropdownButtonFormField<String?>(
                   value: _selectedSubCategory,
                   decoration: InputDecoration(
                     labelText: "Sub-Category",
@@ -2254,10 +2362,10 @@ class _TransactionsTabState extends State<TransactionsTab> {
                   ),
                   isExpanded: true,
                   items: [
-                    const DropdownMenuItem(
+                    const DropdownMenuItem<String?>(
                         value: null, child: Text("All Sub-Categories")),
                     ...sortedSubCategories
-                        .map((s) => DropdownMenuItem(value: s, child: Text(s))),
+                        .map((s) => DropdownMenuItem<String?>(value: s, child: Text(s))),
                   ],
                   onChanged: (val) {
                     setModalState(() => _selectedSubCategory = val);
@@ -2328,7 +2436,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
 
       if (t.splits != null && t.splits!.isNotEmpty) {
         return t.splits!.any((s) =>
-            s.category == _selectedCategory &&
+        s.category == _selectedCategory &&
             (_selectedSubCategory == null ||
                 s.subCategory == _selectedSubCategory));
       }
@@ -2347,18 +2455,18 @@ class _TransactionsTabState extends State<TransactionsTab> {
       appBar: AppBar(
         title: _isSearchVisible
             ? TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: "Search transactions...",
-                  border: InputBorder.none,
-                ),
-                onChanged: (val) => setState(() {}),
-              )
+          controller: _searchCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: "Search transactions...",
+            border: InputBorder.none,
+          ),
+          onChanged: (val) => setState(() {}),
+        )
             : Text("Transactions",
-                style: GoogleFonts.inter(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSurface)),
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface)),
         actions: [
           IconButton(
             icon: Icon(_isSearchVisible ? Icons.close : Icons.search),
@@ -2375,8 +2483,8 @@ class _TransactionsTabState extends State<TransactionsTab> {
               IconButton(
                 icon: const Icon(Icons.filter_list),
                 color: (_selectedCategory != null ||
-                        _selectedType != null ||
-                        _selectedAccountId != null)
+                    _selectedType != null ||
+                    _selectedAccountId != null)
                     ? const Color(0xFF2563EB)
                     : Theme.of(context).colorScheme.onSurfaceVariant,
                 onPressed: _showFilterSheet,
@@ -2420,7 +2528,7 @@ class _TransactionsTabState extends State<TransactionsTab> {
                         color: Theme.of(context).colorScheme.surfaceVariant,
                         borderRadius: BorderRadius.circular(8),
                         border:
-                            Border.all(color: Theme.of(context).dividerColor),
+                        Border.all(color: Theme.of(context).dividerColor),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -2488,12 +2596,12 @@ class _TransactionsTabState extends State<TransactionsTab> {
                           label: Text(
                               widget.accounts
                                   .firstWhere((a) => a.id == _selectedAccountId,
-                                      orElse: () => Account(
-                                          id: -1,
-                                          name: 'Unknown',
-                                          balance: 0,
-                                          type: AccountType.cash,
-                                          createdDate: DateTime.now()))
+                                  orElse: () => Account(
+                                      id: -1,
+                                      name: 'Unknown',
+                                      balance: 0,
+                                      type: AccountType.cash,
+                                      createdDate: DateTime.now()))
                                   .name,
                               style: const TextStyle(fontSize: 10)),
                           deleteIcon: const Icon(Icons.close, size: 12),
@@ -2537,25 +2645,25 @@ class _TransactionsTabState extends State<TransactionsTab> {
           Expanded(
             child: filtered.isEmpty
                 ? Center(
-                    child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.search_off,
-                          size: 48, color: Colors.blueGrey.shade200),
-                      const SizedBox(height: 16),
-                      Text("No transactions found",
-                          style: GoogleFonts.inter(
-                              color: Colors.blueGrey.shade400)),
-                    ],
-                  ))
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.search_off,
+                        size: 48, color: Colors.blueGrey.shade200),
+                    const SizedBox(height: 16),
+                    Text("No transactions found",
+                        style: GoogleFonts.inter(
+                            color: Colors.blueGrey.shade400)),
+                  ],
+                ))
                 : ListView.builder(
-                    padding: const EdgeInsets.all(20),
-                    itemCount: filtered.length,
-                    itemBuilder: (ctx, i) => TransactionItem(
-                        transaction: filtered[i],
-                        accounts: widget.accounts,
-                        currentAccountId: _selectedAccountId),
-                  ),
+              padding: const EdgeInsets.all(20),
+              itemCount: filtered.length,
+              itemBuilder: (ctx, i) => TransactionItem(
+                  transaction: filtered[i],
+                  accounts: widget.accounts,
+                  currentAccountId: _selectedAccountId),
+            ),
           ),
         ],
       ),
@@ -2607,7 +2715,7 @@ class AccountsTab extends StatelessWidget {
       }
     }
 
-    final double openingBalance = account.balance - (totalCredit - totalDebit);
+    final double openingBalance = account.initialBalance;
 
     showModalBottomSheet(
       context: context,
@@ -2709,82 +2817,82 @@ class AccountsTab extends StatelessWidget {
       ),
       body: accounts.isEmpty
           ? Center(
-              child: Text("No accounts yet",
-                  style: GoogleFonts.inter(color: Colors.grey)))
+          child: Text("No accounts yet",
+              style: GoogleFonts.inter(color: Colors.grey)))
           : ListView(
-              padding: const EdgeInsets.all(20),
-              children: AccountType.values.expand((type) {
-                final typeAccounts = groupedAccounts[type]!;
-                if (typeAccounts.isEmpty) return <Widget>[];
-                return [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: Text(
-                      type.name[0].toUpperCase() + type.name.substring(1),
-                      style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color:
-                              Theme.of(context).colorScheme.onSurfaceVariant),
-                    ),
-                  ),
-                  ...typeAccounts.map((acc) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: GestureDetector(
-                          onTap: () => _showAccountDetails(context, acc),
-                          onLongPress: () =>
-                              _showAccountSheet(context, account: acc),
-                          child: Container(
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surface,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                    color: Theme.of(context).dividerColor)),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                      color: acc.color.withOpacity(0.1),
-                                      shape: BoxShape.circle),
-                                  child: Icon(acc.icon,
-                                      color: acc.color, size: 24),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(acc.name,
-                                          style: GoogleFonts.inter(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurface)),
-                                      // Removed type text since it's now a section header
-                                    ],
-                                  ),
-                                ),
-                                Text(
-                                  FinanceCalculator.formatCurrency(acc.balance),
-                                  style: GoogleFonts.inter(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurface),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ))
-                ];
-              }).toList(),
+        padding: const EdgeInsets.all(20),
+        children: AccountType.values.expand((type) {
+          final typeAccounts = groupedAccounts[type]!;
+          if (typeAccounts.isEmpty) return <Widget>[];
+          return [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Text(
+                type.name[0].toUpperCase() + type.name.substring(1),
+                style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color:
+                    Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
             ),
+            ...typeAccounts.map((acc) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: GestureDetector(
+                onTap: () => _showAccountDetails(context, acc),
+                onLongPress: () =>
+                    _showAccountSheet(context, account: acc),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: Theme.of(context).dividerColor)),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                            color: acc.color.withOpacity(0.1),
+                            shape: BoxShape.circle),
+                        child: Icon(acc.icon,
+                            color: acc.color, size: 24),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            Text(acc.name,
+                                style: GoogleFonts.inter(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface)),
+                            // Removed type text since it's now a section header
+                          ],
+                        ),
+                      ),
+                      Text(
+                        FinanceCalculator.formatCurrency(acc.balance),
+                        style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ))
+          ];
+        }).toList(),
+      ),
     );
   }
 }
@@ -2830,10 +2938,10 @@ class _ReportsTabState extends State<ReportsTab> {
             borderRadius: BorderRadius.circular(10),
             boxShadow: isSelected
                 ? [
-                    BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 2)
-                  ]
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 2)
+            ]
                 : [],
           ),
           alignment: Alignment.center,
@@ -2879,29 +2987,29 @@ class _ReportsTabState extends State<ReportsTab> {
         String fee = t.fee.toStringAsFixed(2);
         String source = widget.accounts
             .firstWhere((a) => a.id == t.sourceAccountId,
-                orElse: () => Account(
-                    id: -1,
-                    name: 'Unknown',
-                    balance: 0,
-                    type: AccountType.cash,
-                    createdDate: DateTime.now()))
+            orElse: () => Account(
+                id: -1,
+                name: 'Unknown',
+                balance: 0,
+                type: AccountType.cash,
+                createdDate: DateTime.now()))
             .name;
         String target = t.targetAccountId != null
             ? widget.accounts
-                .firstWhere((a) => a.id == t.targetAccountId!,
-                    orElse: () => Account(
-                        id: -1,
-                        name: 'Unknown',
-                        balance: 0,
-                        type: AccountType.cash,
-                        createdDate: DateTime.now()))
-                .name
+            .firstWhere((a) => a.id == t.targetAccountId!,
+            orElse: () => Account(
+                id: -1,
+                name: 'Unknown',
+                balance: 0,
+                type: AccountType.cash,
+                createdDate: DateTime.now()))
+            .name
             : "";
         String details = t.splits != null && t.splits!.isNotEmpty
             ? t.splits!
-                .map(
-                    (s) => "${s.category}:${s.subCategory ?? ''} (${s.amount})")
-                .join(" | ")
+            .map(
+                (s) => "${s.category}:${s.subCategory ?? ''} (${s.amount})")
+            .join(" | ")
             : "";
 
         if (t.note != null && t.note!.isNotEmpty) {
@@ -2948,11 +3056,11 @@ class _ReportsTabState extends State<ReportsTab> {
     }).toList();
 
     final double monthlyExpense =
-        FinanceCalculator.calculateExpense(monthlyTransactions);
+    FinanceCalculator.calculateExpense(monthlyTransactions);
     final double monthlyInvestment =
-        FinanceCalculator.calculateInvestment(monthlyTransactions);
+    FinanceCalculator.calculateInvestment(monthlyTransactions);
     final double monthlyInflow =
-        FinanceCalculator.calculateIncome(monthlyTransactions);
+    FinanceCalculator.calculateIncome(monthlyTransactions);
     final double monthlyOutflow = monthlyExpense + monthlyInvestment;
     final double netFlow = monthlyInflow - monthlyOutflow;
 
@@ -2982,7 +3090,7 @@ class _ReportsTabState extends State<ReportsTab> {
             icon: const Icon(Icons.download, size: 18),
             label: const Text("Export CSV"),
             style:
-                TextButton.styleFrom(foregroundColor: const Color(0xFF2563EB)),
+            TextButton.styleFrom(foregroundColor: const Color(0xFF2563EB)),
           ),
           const SizedBox(width: 8),
         ],
@@ -3037,8 +3145,8 @@ class _ReportsTabState extends State<ReportsTab> {
                   width: double.infinity,
                   child: (() {
                     final comparisonData =
-                        FinanceCalculator.calculateMonthlyComparison(
-                            widget.transactions);
+                    FinanceCalculator.calculateMonthlyComparison(
+                        widget.transactions);
                     double maxVal = 1.0;
                     for (var d in comparisonData) {
                       if (d.income > maxVal) maxVal = d.income;
@@ -3157,8 +3265,8 @@ class _ReportsTabState extends State<ReportsTab> {
                 _reportType == ReportType.category
                     ? 'CATEGORY BREAKDOWN'
                     : _reportType == ReportType.accountType
-                        ? 'ACCOUNT TYPE BREAKDOWN'
-                        : 'TRANSACTION TYPE BREAKDOWN',
+                    ? 'ACCOUNT TYPE BREAKDOWN'
+                    : 'TRANSACTION TYPE BREAKDOWN',
                 style: GoogleFonts.inter(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -3172,7 +3280,7 @@ class _ReportsTabState extends State<ReportsTab> {
                   borderRadius: BorderRadius.circular(20)),
               child: (() {
                 final total =
-                    sortedBreakdown.values.fold(0.0, (sum, val) => sum + val);
+                sortedBreakdown.values.fold(0.0, (sum, val) => sum + val);
                 return _isPieChart
                     ? _buildPieChart(sortedBreakdown, total)
                     : _buildBarList(sortedBreakdown, total);
@@ -3191,9 +3299,9 @@ class _ReportsTabState extends State<ReportsTab> {
 
   Widget _flowCard(
       {required String label,
-      required double amount,
-      required Color color,
-      required IconData icon}) {
+        required double amount,
+        required Color color,
+        required IconData icon}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -3335,9 +3443,9 @@ class PieChartPainter extends CustomPainter {
 
   PieChartPainter(
       {required this.data,
-      required this.total,
-      required this.colors,
-      required this.surfaceColor});
+        required this.total,
+        required this.colors,
+        required this.surfaceColor});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -3394,7 +3502,7 @@ class BarChartPainter extends CustomPainter {
 
       // Income Bar
       double incomeHeight =
-          maxAmount > 0 ? (data[i].income / maxAmount) * size.height : 0;
+      maxAmount > 0 ? (data[i].income / maxAmount) * size.height : 0;
       canvas.drawRRect(
         RRect.fromRectAndCorners(
           Rect.fromLTWH(x - (barWidth * 1.5), size.height - incomeHeight, barWidth - 2,
@@ -3407,7 +3515,7 @@ class BarChartPainter extends CustomPainter {
 
       // Expense Bar
       double expenseHeight =
-          maxAmount > 0 ? (data[i].expense / maxAmount) * size.height : 0;
+      maxAmount > 0 ? (data[i].expense / maxAmount) * size.height : 0;
       canvas.drawRRect(
         RRect.fromRectAndCorners(
           Rect.fromLTWH(
@@ -3420,7 +3528,7 @@ class BarChartPainter extends CustomPainter {
 
       // Investment Bar
       double investmentHeight =
-          maxAmount > 0 ? (data[i].investment / maxAmount) * size.height : 0;
+      maxAmount > 0 ? (data[i].investment / maxAmount) * size.height : 0;
       canvas.drawRRect(
         RRect.fromRectAndCorners(
           Rect.fromLTWH(
@@ -3487,7 +3595,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
               onPressed: () {
                 if (ctrl.text.isNotEmpty) {
                   final newCats =
-                      Map<String, List<String>>.from(widget.categories);
+                  Map<String, List<String>>.from(widget.categories);
                   newCats[ctrl.text] = [];
                   _updateCategories(newCats);
                   Navigator.pop(ctx);
@@ -3516,7 +3624,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
               onPressed: () {
                 if (ctrl.text.isNotEmpty) {
                   final newCats =
-                      Map<String, List<String>>.from(widget.categories);
+                  Map<String, List<String>>.from(widget.categories);
                   newCats[category] = List.from(newCats[category]!)
                     ..add(ctrl.text);
                   _updateCategories(newCats);
@@ -3545,28 +3653,28 @@ class _CategoriesTabState extends State<CategoriesTab> {
                 showDialog(
                     context: context,
                     builder: (c) => AlertDialog(
-                          title: const Text("Delete Category?"),
-                          content: const Text(
-                              "This will delete the category and all sub-categories options."),
-                          actions: [
-                            TextButton(
-                                onPressed: () => Navigator.pop(c),
-                                child: const Text("Cancel")),
-                            TextButton(
-                                onPressed: () {
-                                  final newCats =
-                                      Map<String, List<String>>.from(
-                                          widget.categories);
-                                  newCats.remove(oldName);
-                                  _updateCategories(newCats);
-                                  Navigator.pop(c);
-                                  Navigator.pop(ctx);
-                                },
-                                style: TextButton.styleFrom(
-                                    foregroundColor: Colors.red),
-                                child: const Text("Delete")),
-                          ],
-                        ));
+                      title: const Text("Delete Category?"),
+                      content: const Text(
+                          "This will delete the category and all sub-categories options."),
+                      actions: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(c),
+                            child: const Text("Cancel")),
+                        TextButton(
+                            onPressed: () {
+                              final newCats =
+                              Map<String, List<String>>.from(
+                                  widget.categories);
+                              newCats.remove(oldName);
+                              _updateCategories(newCats);
+                              Navigator.pop(c);
+                              Navigator.pop(ctx);
+                            },
+                            style: TextButton.styleFrom(
+                                foregroundColor: Colors.red),
+                            child: const Text("Delete")),
+                      ],
+                    ));
               },
               style: TextButton.styleFrom(foregroundColor: Colors.red),
               child: const Text("Delete")),
@@ -3574,7 +3682,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
               onPressed: () {
                 if (ctrl.text.isNotEmpty && ctrl.text != oldName) {
                   final newCats =
-                      Map<String, List<String>>.from(widget.categories);
+                  Map<String, List<String>>.from(widget.categories);
                   final subs = newCats.remove(oldName);
                   newCats[ctrl.text] = subs!;
                   _updateCategories(newCats);
@@ -3601,7 +3709,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
           TextButton(
               onPressed: () {
                 final newCats =
-                    Map<String, List<String>>.from(widget.categories);
+                Map<String, List<String>>.from(widget.categories);
                 newCats[category] = List.from(newCats[category]!)
                   ..remove(oldSub);
                 _updateCategories(newCats);
@@ -3613,7 +3721,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
               onPressed: () {
                 if (ctrl.text.isNotEmpty) {
                   final newCats =
-                      Map<String, List<String>>.from(widget.categories);
+                  Map<String, List<String>>.from(widget.categories);
                   final list = List<String>.from(newCats[category]!);
                   final idx = list.indexOf(oldSub);
                   if (idx != -1) list[idx] = ctrl.text;
@@ -3666,7 +3774,7 @@ class _CategoriesTabState extends State<CategoriesTab> {
                   icon: const Icon(Icons.edit, size: 18),
                   onPressed: () => _editCategory(cat)),
               childrenPadding:
-                  const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+              const EdgeInsets.only(left: 16, right: 16, bottom: 16),
               expandedCrossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Wrap(
@@ -3674,19 +3782,19 @@ class _CategoriesTabState extends State<CategoriesTab> {
                   runSpacing: 8,
                   children: [
                     ...subs.map((sub) => GestureDetector(
-                          onLongPress: () => _editSubCategory(cat, sub),
-                          child: Chip(
-                            label: Text(sub,
-                                style: GoogleFonts.inter(fontSize: 14)),
-                            backgroundColor: Theme.of(context)
-                                .colorScheme
-                                .secondaryContainer,
-                            side: BorderSide.none,
-                          ),
-                        )),
+                      onLongPress: () => _editSubCategory(cat, sub),
+                      child: Chip(
+                        label: Text(sub,
+                            style: GoogleFonts.inter(fontSize: 14)),
+                        backgroundColor: Theme.of(context)
+                            .colorScheme
+                            .secondaryContainer,
+                        side: BorderSide.none,
+                      ),
+                    )),
                     ActionChip(
                       label:
-                          const Icon(Icons.add, size: 16, color: Colors.blue),
+                      const Icon(Icons.add, size: 16, color: Colors.blue),
                       backgroundColor: Theme.of(context).colorScheme.surface,
                       side: BorderSide(
                           color: Theme.of(context)
@@ -3715,9 +3823,9 @@ class TransactionItem extends StatelessWidget {
 
   const TransactionItem(
       {super.key,
-      required this.transaction,
-      required this.accounts,
-      this.currentAccountId});
+        required this.transaction,
+        required this.accounts,
+        this.currentAccountId});
 
   void _deleteTransaction(BuildContext context, String id) {
     final user = AuthService.currentUser;
@@ -3729,7 +3837,7 @@ class TransactionItem extends StatelessWidget {
     final txn = transaction;
 
     final sourceAccount = accounts.firstWhere(
-        (a) => a.id == txn.sourceAccountId,
+            (a) => a.id == txn.sourceAccountId,
         orElse: () => Account(
             id: -1,
             name: 'Unknown',
@@ -3756,7 +3864,7 @@ class TransactionItem extends StatelessWidget {
 
     if (txn.type == TransactionType.transfer && txn.targetAccountId != null) {
       final targetAccount = accounts.firstWhere(
-          (a) => a.id == txn.targetAccountId,
+              (a) => a.id == txn.targetAccountId,
           orElse: () => Account(
               id: -1,
               name: 'Unknown',
@@ -3807,24 +3915,24 @@ class TransactionItem extends StatelessWidget {
 
     final accountName = accounts
         .firstWhere((a) => a.id == transaction.sourceAccountId,
-            orElse: () => Account(
-                id: -1,
-                name: 'Unknown',
-                balance: 0,
-                type: AccountType.cash,
-                createdDate: DateTime.now()))
+        orElse: () => Account(
+            id: -1,
+            name: 'Unknown',
+            balance: 0,
+            type: AccountType.cash,
+            createdDate: DateTime.now()))
         .name;
 
     String? targetAccountName;
     if (transaction.targetAccountId != null) {
       targetAccountName = accounts
           .firstWhere((a) => a.id == transaction.targetAccountId,
-              orElse: () => Account(
-                  id: -1,
-                  name: 'Unknown',
-                  balance: 0,
-                  type: AccountType.cash,
-                  createdDate: DateTime.now()))
+          orElse: () => Account(
+              id: -1,
+              name: 'Unknown',
+              balance: 0,
+              type: AccountType.cash,
+              createdDate: DateTime.now()))
           .name;
     }
 
@@ -3868,19 +3976,19 @@ class TransactionItem extends StatelessWidget {
                       style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   ...transaction.splits!.map((s) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                                "${s.category}${s.subCategory != null && s.subCategory!.isNotEmpty ? ' - ${s.subCategory}' : ''}",
-                                style: GoogleFonts.inter(fontSize: 13)),
-                            Text(formatCurrency(s.amount),
-                                style: GoogleFonts.inter(
-                                    fontWeight: FontWeight.w500)),
-                          ],
-                        ),
-                      )),
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                            "${s.category}${s.subCategory != null && s.subCategory!.isNotEmpty ? ' - ${s.subCategory}' : ''}",
+                            style: GoogleFonts.inter(fontSize: 13)),
+                        Text(formatCurrency(s.amount),
+                            style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  )),
                 ] else ...[
                   if (transaction.type != TransactionType.investment)
                     _detailRow("Category", transaction.category),
@@ -3973,9 +4081,9 @@ class TransactionItem extends StatelessWidget {
       icon = Icons.swap_horiz;
       sign = "-"; // Default for outgoing
     } else if (transaction.type == TransactionType.investment) {
-       color = Colors.purple;
-       icon = Icons.savings;
-       sign = "-"; // Investment is money out
+      color = Colors.purple;
+      icon = Icons.savings;
+      sign = "-"; // Investment is money out
     } else {
       // Expense
       color = Colors.red;
@@ -3988,7 +4096,7 @@ class TransactionItem extends StatelessWidget {
 
     // If incoming transfer, we only show the amount received (no fee)
     if (isIncomingTransfer) {
-        amountText = FinanceCalculator.formatCurrency(transaction.amount);
+      amountText = FinanceCalculator.formatCurrency(transaction.amount);
     }
 
     return Dismissible(
@@ -4056,12 +4164,12 @@ class TransactionItem extends StatelessWidget {
                             isTransfer
                                 ? 'Transfer'
                                 : (isIncome
-                                    ? 'Income'
-                                    : (transaction.type == TransactionType.investment
-                                        ? 'Investment'
-                                        : (isSplit
-                                            ? 'Split Expense'
-                                            : transaction.category))),
+                                ? 'Income'
+                                : (transaction.type == TransactionType.investment
+                                ? 'Investment'
+                                : (isSplit
+                                ? 'Split Expense'
+                                : transaction.category))),
                             style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                         if (transaction.recurrence != RecurrenceFrequency.none)
                           Padding(
@@ -4160,9 +4268,9 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
     if (widget.existingAccount != null) {
       _nameCtrl.text = widget.existingAccount!.name;
       // Convert from base INR to current display currency
-      final displayBalance =
-          FinanceCalculator.convertFromBase(widget.existingAccount!.balance);
-      _balanceCtrl.text = displayBalance.toStringAsFixed(2);
+      final displayInitial =
+      FinanceCalculator.convertFromBase(widget.existingAccount!.initialBalance);
+      _balanceCtrl.text = displayInitial == 0 ? '' : displayInitial.toStringAsFixed(2);
       _selectedType = widget.existingAccount!.type;
       _selectedDate = widget.existingAccount!.createdDate;
     }
@@ -4172,16 +4280,24 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
     final user = AuthService.currentUser;
     if (user == null) return;
 
-    final double displayBalance = double.tryParse(_balanceCtrl.text) ?? 0.0;
+    final double displayInitial = double.tryParse(_balanceCtrl.text) ?? 0.0;
     // Convert from current display currency back to base INR
-    final double balance = FinanceCalculator.convertToBase(displayBalance);
+    final double newInitial = FinanceCalculator.convertToBase(displayInitial);
     final int id =
         widget.existingAccount?.id ?? DateTime.now().millisecondsSinceEpoch;
+
+    double currentBalance = newInitial;
+    if (widget.existingAccount != null) {
+      // Adjust the current balance by the manual change in the initial balance
+      final difference = newInitial - widget.existingAccount!.initialBalance;
+      currentBalance = widget.existingAccount!.balance + difference;
+    }
 
     final account = Account(
         id: id,
         name: _nameCtrl.text,
-        balance: balance,
+        balance: currentBalance,
+        initialBalance: newInitial,
         type: _selectedType,
         createdDate: _selectedDate);
 
@@ -4272,10 +4388,10 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
                           borderRadius: BorderRadius.circular(10),
                           boxShadow: isSelected
                               ? [
-                                  BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 4)
-                                ]
+                            BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 4)
+                          ]
                               : []),
                       alignment: Alignment.center,
                       child: Text(
@@ -4296,7 +4412,7 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
           TextField(
               controller: _nameCtrl,
               style:
-                  GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
+              GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
               decoration: const InputDecoration(
                   hintText: 'Account Name',
                   labelText: "Name",
@@ -4304,17 +4420,21 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
           const SizedBox(height: 16),
           TextField(
               controller: _balanceCtrl,
-              keyboardType: TextInputType.number,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
               ],
               style:
-                  GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
+              GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
+                  labelText: "Opening Balance",
+                  labelStyle: GoogleFonts.inter(
+                      fontSize: 14, color: Colors.grey.shade600, fontWeight: FontWeight.normal),
                   prefixText:
-                      '${FinanceCalculator.getSelectedCurrencySymbol()} ',
-                  border: InputBorder.none,
-                  hintText: '0.00 (Optional)')),
+                  '${FinanceCalculator.getSelectedCurrencySymbol()} ',
+                  border: const UnderlineInputBorder(),
+                  hintText: '0.00')),
+          const SizedBox(height: 16),
           GestureDetector(
             onTap: _pickDate,
             child: Container(
@@ -4435,10 +4555,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
         _isSplitMode = true;
         // Also convert splits from base
         _currentSplits.addAll(t.splits!.map((s) => TransactionSplit(
-              category: s.category,
-              subCategory: s.subCategory,
-              amount: FinanceCalculator.convertFromBase(s.amount),
-            )));
+          category: s.category,
+          subCategory: s.subCategory,
+          amount: FinanceCalculator.convertFromBase(s.amount),
+        )));
       }
     }
   }
@@ -4463,7 +4583,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             final sortedKeys = _expenseCategories.keys.toList()..sort();
             _selectedCategory = sortedKeys.first;
             _selectedSubCategory =
-                _expenseCategories[_selectedCategory]?.firstOrNull;
+            _expenseCategories[_selectedCategory]?.isNotEmpty == true ? _expenseCategories[_selectedCategory]!.first : null;
           }
         });
       } else {
@@ -4479,7 +4599,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
           final sortedKeys = _expenseCategories.keys.toList()..sort();
           _selectedCategory = sortedKeys.first;
           _selectedSubCategory =
-              _expenseCategories[_selectedCategory]?.firstOrNull;
+          _expenseCategories[_selectedCategory]?.isNotEmpty == true ? _expenseCategories[_selectedCategory]!.first : null;
         });
       }
     }
@@ -4512,7 +4632,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     }
 
     final double currentTotalSplits =
-        _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
+    _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     final double remaining = totalAmount - currentTotalSplits;
 
     if (splitAmt > remaining + 0.01) {
@@ -4544,7 +4664,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       if ((splitTotal - displayAmount).abs() > 0.01) {
         setState(() {
           _submitErrorText =
-              "Split total (${splitTotal.toStringAsFixed(2)}) != Amount (${displayAmount.toStringAsFixed(2)})";
+          "Split total (${splitTotal.toStringAsFixed(2)}) != Amount (${displayAmount.toStringAsFixed(2)})";
         });
         return;
       }
@@ -4614,24 +4734,24 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
       type: _selectedType,
       sourceAccountId: _selectedSourceId,
       targetAccountId:
-          _selectedType == TransactionType.transfer ? _selectedTargetId : null,
+      _selectedType == TransactionType.transfer ? _selectedTargetId : null,
       category: (_selectedType == TransactionType.expense || _selectedType == TransactionType.investment)
           ? (_isSplitMode ? 'Split' : _selectedCategory)
           : (_selectedType == TransactionType.income
-              ? _selectedCategory
-              : 'Transfer'),
+          ? _selectedCategory
+          : 'Transfer'),
       subCategory: (_selectedType == TransactionType.expense || _selectedType == TransactionType.investment)
           ? (_isSplitMode ? null : _selectedSubCategory)
           : null,
       date: _selectedDate,
       splits: _isSplitMode
           ? _currentSplits
-              .map((s) => TransactionSplit(
-                    category: s.category,
-                    subCategory: s.subCategory,
-                    amount: FinanceCalculator.convertToBase(s.amount),
-                  ))
-              .toList()
+          .map((s) => TransactionSplit(
+        category: s.category,
+        subCategory: s.subCategory,
+        amount: FinanceCalculator.convertToBase(s.amount),
+      ))
+          .toList()
           : null,
       note: _noteCtrl.text.isEmpty ? null : _noteCtrl.text,
       recurrence: _recurrence,
@@ -4648,7 +4768,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     if (_selectedType == TransactionType.transfer) {
       if (_selectedSourceId == _selectedTargetId) {
         final available =
-            widget.accounts.where((a) => a.id != _selectedSourceId);
+        widget.accounts.where((a) => a.id != _selectedSourceId);
         if (available.isNotEmpty) _selectedTargetId = available.first.id;
       }
     }
@@ -4671,11 +4791,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     }
 
     final currentTotal =
-        _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
+    _currentSplits.fold(0.0, (sum, item) => sum + item.amount);
     if ((currentTotal + amt) > totalAmount + 0.01) {
       setState(() {
         _splitErrorText =
-            "Exceeds total! Rem: ${FinanceCalculator.getSelectedCurrencySymbol()}${(totalAmount - currentTotal).toStringAsFixed(2)}";
+        "Exceeds total! Rem: ${FinanceCalculator.getSelectedCurrencySymbol()}${(totalAmount - currentTotal).toStringAsFixed(2)}";
       });
       return;
     }
@@ -4698,19 +4818,36 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(
+    final pickedDate = await showDatePicker(
         context: context,
         initialDate: _selectedDate,
         firstDate: DateTime(2020),
         lastDate: DateTime.now());
-    if (picked != null) setState(() => _selectedDate = picked);
+
+    if (pickedDate != null) {
+      if (!mounted) return;
+      final pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(_selectedDate),
+      );
+
+      setState(() {
+        _selectedDate = DateTime(
+          pickedDate.year,
+          pickedDate.month,
+          pickedDate.day,
+          pickedTime?.hour ?? _selectedDate.hour,
+          pickedTime?.minute ?? _selectedDate.minute,
+        );
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final double totalAmount = double.tryParse(_amountCtrl.text) ?? 0;
     final double currentSplitTotal =
-        _currentSplits.fold(0, (sum, item) => sum + item.amount);
+    _currentSplits.fold(0, (sum, item) => sum + item.amount);
     final double remaining = totalAmount - currentSplitTotal;
 
     // Sort accounts for dropdown
@@ -4725,7 +4862,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     if (_selectedCategory.isNotEmpty &&
         _expenseCategories[_selectedCategory] != null) {
       sortedSubCategories =
-          List<String>.from(_expenseCategories[_selectedCategory]!)..sort();
+      List<String>.from(_expenseCategories[_selectedCategory]!)..sort();
     }
 
     return Container(
@@ -4771,14 +4908,13 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 ..sort();
                               _selectedCategory = sortedKeys.first;
                               _selectedSubCategory =
-                                  _expenseCategories[_selectedCategory]
-                                      ?.firstOrNull;
+                              _expenseCategories[_selectedCategory]?.isNotEmpty == true ? _expenseCategories[_selectedCategory]!.first : null;
                             }
                           } else if (_selectedType == TransactionType.investment) {
                             if (_expenseCategories.containsKey('Investment')) {
                               _selectedCategory = 'Investment';
                               _selectedSubCategory =
-                                  _expenseCategories['Investment']?.firstOrNull;
+                              _expenseCategories['Investment']?.isNotEmpty == true ? _expenseCategories['Investment']!.first : null;
                             } else {
                               // Fallback if Investment category missing from map
                               _selectedCategory = 'Investment';
@@ -4796,10 +4932,10 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                             borderRadius: BorderRadius.circular(10),
                             boxShadow: isSelected
                                 ? [
-                                    BoxShadow(
-                                        color: Colors.black.withOpacity(0.05),
-                                        blurRadius: 4)
-                                  ]
+                              BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 4)
+                            ]
                                 : []),
                         alignment: Alignment.center,
                         child: Text(
@@ -4810,11 +4946,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 fontSize: 13,
                                 color: isSelected
                                     ? Theme.of(context)
-                                        .colorScheme
-                                        .onPrimaryContainer
+                                    .colorScheme
+                                    .onPrimaryContainer
                                     : Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant)),
+                                    .colorScheme
+                                    .onSurfaceVariant)),
                       ),
                     ),
                   );
@@ -4826,7 +4962,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
               onTap: _pickDate,
               child: Container(
                   padding:
-                      const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                   decoration: BoxDecoration(
                       border: Border.all(color: Theme.of(context).dividerColor),
                       borderRadius: BorderRadius.circular(12)),
@@ -4834,7 +4970,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                     const Icon(Icons.calendar_today,
                         size: 18, color: Colors.blue),
                     const SizedBox(width: 8),
-                    Text(DateFormat('dd MMM yyyy').format(_selectedDate),
+                    Text(DateFormat('dd MMM yyyy, hh:mm a').format(_selectedDate),
                         style: GoogleFonts.inter(
                             fontWeight: FontWeight.w500,
                             color: Theme.of(context).colorScheme.onSurface)),
@@ -4859,7 +4995,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 decoration: InputDecoration(
                     labelText: "AMOUNT",
                     prefixText:
-                        '${FinanceCalculator.getSelectedCurrencySymbol()} ',
+                    '${FinanceCalculator.getSelectedCurrencySymbol()} ',
                     border: InputBorder.none)),
             const Divider(),
             const SizedBox(height: 16),
@@ -4872,7 +5008,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                     ? 'Deposit To'
                     : 'Pay From',
                 border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 prefixIcon: const Icon(Icons.account_balance_wallet),
               ),
               items: sortedAccounts.map((acc) {
@@ -4886,7 +5022,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             const SizedBox(height: 16),
 
             // Target Account
-             if (_selectedType == TransactionType.transfer) ...[
+            if (_selectedType == TransactionType.transfer) ...[
               DropdownButtonFormField<int>(
                 value: _selectedTargetId,
                 decoration: InputDecoration(
@@ -4909,7 +5045,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
               TextField(
                 controller: _feeCtrl,
                 keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                   labelText: 'Transfer Fee',
                   border: OutlineInputBorder(
@@ -4922,12 +5058,12 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
 
             // Category
             if ((_selectedType == TransactionType.expense ||
-                    _selectedType == TransactionType.income) &&
+                _selectedType == TransactionType.income) &&
                 !_isSplitMode)
               DropdownButtonFormField<String>(
                 value: (_selectedType == TransactionType.expense
-                        ? sortedExpenseCategories.contains(_selectedCategory)
-                        : _incomeCategories.contains(_selectedCategory))
+                    ? sortedExpenseCategories.contains(_selectedCategory)
+                    : _incomeCategories.contains(_selectedCategory))
                     ? _selectedCategory
                     : null,
                 decoration: InputDecoration(
@@ -4938,21 +5074,21 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                 ),
                 items: _selectedType == TransactionType.expense
                     ? (sortedExpenseCategories
-                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                        .toList())
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                    .toList())
                     : _incomeCategories
-                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                        .toList(),
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                    .toList(),
                 onChanged: (val) => setState(() {
                   _selectedCategory = val!;
                   _selectedSubCategory = null;
                 }),
               ),
 
-             if (_selectedType == TransactionType.investment) ...[
+            if (_selectedType == TransactionType.investment) ...[
               DropdownButtonFormField<String>(
                 value: ((_expenseCategories['Investment'] ?? [])
-                        .contains(_selectedSubCategory))
+                    .contains(_selectedSubCategory))
                     ? _selectedSubCategory
                     : null,
                 decoration: InputDecoration(
@@ -4970,7 +5106,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
             ],
 
             if ((_selectedType == TransactionType.expense ||
-                    _selectedType == TransactionType.income) &&
+                _selectedType == TransactionType.income) &&
                 _selectedCategory.isNotEmpty &&
                 !_isSplitMode &&
                 _expenseCategories[_selectedCategory] != null) ...[
@@ -5069,7 +5205,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                         onChanged: (val) => setState(() {
                           _selectedCategory = val!;
                           _selectedSubCategory =
-                              _expenseCategories[_selectedCategory]?.firstOrNull;
+                          _expenseCategories[_selectedCategory]?.isNotEmpty == true ? _expenseCategories[_selectedCategory]!.first : null;
                         }),
                       ),
                       const SizedBox(height: 12),
@@ -5102,7 +5238,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                                 labelText: 'Amount',
                                 isDense: true,
                                 prefixText:
-                                    '${FinanceCalculator.getSelectedCurrencySymbol()} ',
+                                '${FinanceCalculator.getSelectedCurrencySymbol()} ',
                                 border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12)),
                               ),
@@ -5125,7 +5261,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                         const SizedBox(height: 8),
                         Text(_splitErrorText!,
                             style:
-                                const TextStyle(color: Colors.red, fontSize: 12)),
+                            const TextStyle(color: Colors.red, fontSize: 12)),
                       ],
                     ],
                   ),
@@ -5137,7 +5273,7 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
                         border: Border.all(color: Theme.of(context).dividerColor),
                         borderRadius: BorderRadius.circular(12)),
@@ -5328,6 +5464,7 @@ class AccountAdapter extends TypeAdapter<Account> {
       id: reader.readInt(),
       name: reader.readString(),
       balance: reader.readDouble(),
+      initialBalance: 0.0, // Default to 0 to safely migrate older local data
       type: AccountType.values[reader.readByte()],
       createdDate: DateTime.fromMillisecondsSinceEpoch(reader.readInt()));
 
