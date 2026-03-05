@@ -4515,7 +4515,11 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     'Gift',
     'Refund',
     'Bonus',
-    'Other'
+    'Other',
+    'Interest',
+    'Dividend',
+    'Stock Sales',
+    'MF Sales',
   ];
   String _selectedCategory = '';
   String? _selectedSubCategory;
