@@ -1052,7 +1052,6 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
 
   void _checkRecurringTransactions(List<Transaction> transactions,
       List<Account> accounts, String userId) async {
-    // ... existing recurring logic ...
     if (_recurrenceChecked) return;
     _recurrenceChecked = true;
 
@@ -1305,17 +1304,18 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                   builder: (context, box, _) {
                     final List<Widget> pages = [
                       DashboardTab(
-                          accounts: accounts, transactions: transactions),
+                          accounts: accounts,
+                          transactions: transactions,
+                          onProfileTap: () => setState(() => _currentIndex = 4)),
                       TransactionsTab(
                           transactions: transactions,
                           accounts: accounts,
                           categories: categories),
                       AccountsTab(
                           accounts: accounts, transactions: transactions),
-                      // Passed transactions
                       ReportsTab(
                           accounts: accounts, transactions: transactions),
-                      CategoriesTab(categories: categories),
+                      const SettingsTab(), // Replaced CategoriesTab with modern SettingsTab
                     ];
 
                     return Scaffold(
@@ -1347,9 +1347,9 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                               activeIcon: Icon(Icons.bar_chart),
                               label: 'Reports'),
                           BottomNavigationBarItem(
-                              icon: Icon(Icons.category_outlined),
-                              activeIcon: Icon(Icons.category),
-                              label: 'Categories'),
+                              icon: Icon(Icons.settings_outlined),
+                              activeIcon: Icon(Icons.settings),
+                              label: 'Settings'),
                         ],
                       ),
                       floatingActionButton: _currentIndex == 0
@@ -1392,9 +1392,14 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
 class DashboardTab extends StatefulWidget {
   final List<Account> accounts;
   final List<Transaction> transactions;
+  final VoidCallback onProfileTap;
 
-  const DashboardTab(
-      {super.key, required this.accounts, required this.transactions});
+  const DashboardTab({
+    super.key,
+    required this.accounts,
+    required this.transactions,
+    required this.onProfileTap,
+  });
 
   @override
   State<DashboardTab> createState() => _DashboardTabState();
@@ -1409,616 +1414,6 @@ class _DashboardTabState extends State<DashboardTab> {
       _currentMonth =
           DateTime(_currentMonth.year, _currentMonth.month + offset);
     });
-  }
-
-  void _signOut(BuildContext context) async {
-    await AuthService.signOut();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-            (route) => false,
-      );
-    }
-  }
-
-  void _switchAccount(BuildContext context) async {
-    // 1. Sign out the current user
-    await AuthService.signOut();
-
-    // 2. Navigate back to Welcome Screen
-    // The welcome screen will see user is null, and show "Sign In" button.
-    // The user can then click "Sign in with Google" which will open the account picker
-    // (because signOut() calls googleSignIn.signOut()).
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-            (route) => false,
-      );
-    }
-  }
-
-  void _deleteAccountData(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Delete All Data?',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
-        content: Text(
-            'This will permanently delete all your transactions, accounts, and settings. This action cannot be undone.',
-            style: GoogleFonts.inter()),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: GoogleFonts.inter(color: Colors.grey)),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              // Show loading overlay
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (context) => const Center(
-                  child: CircularProgressIndicator(),
-                ),
-              );
-
-              await AuthService.deleteUserData();
-
-              if (mounted) {
-                Navigator.pop(context); // Close loading
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("All data deleted successfully")),
-                );
-              }
-            },
-            child: Text('Delete Everything',
-                style: GoogleFonts.inter(
-                    color: Colors.red, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _reSyncData(BuildContext context) async {
-    final user = AuthService.currentUser;
-    if (user == null) return;
-
-    // Show loading overlay
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
-
-    try {
-      final firestore = FirebaseFirestore.instance;
-      final userDoc = firestore.collection('users').doc(user.uid);
-
-      // Fetch all accounts and transactions
-      final accountsSnap = await userDoc.collection('accounts').get();
-      final transactionsSnap = await userDoc.collection('transactions').get();
-
-      Map<int, double> recalculatedBalances = {};
-
-      // 1. Initialize all account balances to their Opening Balances
-      for (var doc in accountsSnap.docs) {
-        final data = doc.data();
-        final id = data['id'] as int;
-        final double initialBal = data.containsKey('initialBalance')
-            ? EncryptionService.decryptDouble(data['initialBalance'])
-            : 0.0;
-        recalculatedBalances[id] = initialBal;
-      }
-
-      // 2. Recompute balances strictly from transactions
-      for (var doc in transactionsSnap.docs) {
-        final data = doc.data();
-        final t = Transaction.fromMap(data);
-
-        if (recalculatedBalances.containsKey(t.sourceAccountId)) {
-          if (t.type == TransactionType.income) {
-            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! + t.amount;
-          } else if (t.type == TransactionType.expense || t.type == TransactionType.investment) {
-            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! - t.amount;
-          } else if (t.type == TransactionType.transfer) {
-            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! - (t.amount + t.fee);
-          }
-        }
-
-        if (t.type == TransactionType.transfer && t.targetAccountId != null) {
-          if (recalculatedBalances.containsKey(t.targetAccountId)) {
-            recalculatedBalances[t.targetAccountId!] = recalculatedBalances[t.targetAccountId!]! + t.amount;
-          }
-        }
-      }
-
-      // 3. Update Firestore with new accurate balances
-      final batch = firestore.batch();
-      for (var doc in accountsSnap.docs) {
-        final data = doc.data();
-        final id = data['id'] as int;
-        if (recalculatedBalances.containsKey(id)) {
-          batch.update(doc.reference, {
-            'balance': EncryptionService.encryptDouble(recalculatedBalances[id]!)
-          });
-        }
-      }
-
-      await batch.commit();
-
-      if (context.mounted) {
-        Navigator.pop(context); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Data re-synced successfully!")),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        Navigator.pop(context); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error re-syncing data: $e")),
-        );
-      }
-    }
-  }
-
-  void _promptReSync(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Re-sync Data',
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
-        content: Text(
-            'This will recalculate all your account balances from scratch using your transaction history and Opening Balances.\n\n⚠️ IMPORTANT: If your account had a starting balance but you didn\'t explicitly set an "Opening Balance" for it yet, please cancel this, go to the Accounts tab, long-press your account to edit it, and set your Opening Balance first.',
-            style: GoogleFonts.inter(fontSize: 14)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: GoogleFonts.inter(color: Colors.grey)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _reSyncData(context);
-            },
-            child: Text('Re-sync Data',
-                style: GoogleFonts.inter(
-                    color: Colors.teal, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showProfileOptions(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 24),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).dividerColor,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                if (_user != null) ...[
-                  CircleAvatar(
-                    radius: 36,
-                    backgroundColor: Colors.blue.shade50,
-                    backgroundImage: _user!.photoURL != null
-                        ? NetworkImage(_user!.photoURL!)
-                        : null,
-                    child: _user!.photoURL == null
-                        ? Text(_user!.displayName?[0] ?? "U",
-                        style: GoogleFonts.inter(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue.shade700))
-                        : null,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _user!.displayName ?? 'User',
-                    style: GoogleFonts.inter(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.onSurface),
-                  ),
-                  Text(
-                    _user!.email ?? '',
-                    style: GoogleFonts.inter(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 14),
-                  ),
-                  const SizedBox(height: 24),
-                  const Divider(height: 1),
-                  const SizedBox(height: 12),
-                ],
-
-                // Biometric Toggle
-                StatefulBuilder(builder: (context, setSheetState) {
-                  final box = Hive.box('settings');
-                  bool isEnabled =
-                  box.get('isBiometricEnabled', defaultValue: false);
-                  return ListTile(
-                    contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                          color: isEnabled
-                              ? Colors.green.shade50
-                              : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(8)),
-                      child: Icon(Icons.fingerprint,
-                          color: isEnabled
-                              ? Colors.green.shade600
-                              : Colors.grey.shade600),
-                    ),
-                    title: Text('Biometric Lock',
-                        style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.blueGrey.shade800)),
-                    subtitle: Text(
-                        isEnabled
-                            ? 'App is locked on startup'
-                            : 'Enable to protect your data',
-                        style: GoogleFonts.inter(
-                            fontSize: 12, color: Colors.blueGrey.shade400)),
-                    trailing: Switch(
-                      value: isEnabled,
-                      activeColor: const Color(0xFF2563EB),
-                      onChanged: (val) async {
-                        if (val) {
-                          // Verify biometrics before enabling
-                          bool canCheck =
-                          await BiometricAuthService.canCheckBiometrics();
-                          if (!canCheck) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        "Biometrics not available on this device")),
-                              );
-                            }
-                            return;
-                          }
-                          bool authenticated =
-                          await BiometricAuthService.authenticate();
-                          if (authenticated) {
-                            await box.put('isBiometricEnabled', true);
-                            setSheetState(() {});
-                          }
-                        } else {
-                          await box.put('isBiometricEnabled', false);
-                          setSheetState(() {});
-                        }
-                      },
-                    ),
-                  );
-                }),
-                const SizedBox(height: 8),
-
-                StatefulBuilder(builder: (context, setSheetState) {
-                  final box = Hive.box('settings');
-                  String currentCurrency =
-                  box.get('currency', defaultValue: 'inr');
-
-                  final currencyListTile = ListTile(
-                    contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                          color: Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(8)),
-                      child: Icon(Icons.payments_outlined,
-                          color: Colors.orange.shade600),
-                    ),
-                    title: Text('Reference Currency',
-                        style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface)),
-                    subtitle: Text(
-                        'Display amounts in ${currentCurrency.toUpperCase()}',
-                        style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant)),
-                    trailing: DropdownButton<String>(
-                      value: currentCurrency,
-                      underline: const SizedBox(),
-                      items: Currency.values.map((c) {
-                        return DropdownMenuItem(
-                          value: c.name,
-                          child: Text(c.label),
-                        );
-                      }).toList(),
-                      onChanged: (val) async {
-                        if (val != null) {
-                          await box.put('currency', val);
-                          setSheetState(() {});
-                        }
-                      },
-                    ),
-                  );
-
-                  String currentThemeMode =
-                  box.get('themeMode', defaultValue: 'system');
-
-                  final themeListTile = ListTile(
-                    contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                          color: Colors.purple.shade50,
-                          borderRadius: BorderRadius.circular(8)),
-                      child: Icon(
-                          currentThemeMode == 'dark'
-                              ? Icons.dark_mode_outlined
-                              : (currentThemeMode == 'light'
-                              ? Icons.light_mode_outlined
-                              : Icons.brightness_auto_outlined),
-                          color: Colors.purple.shade600),
-                    ),
-                    title: Text('App Theme',
-                        style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface)),
-                    subtitle: Text(
-                        'Current: ${currentThemeMode[0].toUpperCase()}${currentThemeMode.substring(1)}',
-                        style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant)),
-                    trailing: DropdownButton<String>(
-                      value: currentThemeMode,
-                      underline: const SizedBox(),
-                      items: ['light', 'dark', 'system'].map((m) {
-                        return DropdownMenuItem(
-                          value: m,
-                          child: Text(m[0].toUpperCase() + m.substring(1)),
-                        );
-                      }).toList(),
-                      onChanged: (val) async {
-                        if (val != null) {
-                          await box.put('themeMode', val);
-                          setSheetState(() {});
-                        }
-                      },
-                    ),
-                  );
-
-                  return Column(
-                    children: [
-                      currencyListTile,
-                      themeListTile,
-                      ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
-                        leading: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(8)),
-                          child: Icon(Icons.sync, color: Colors.blue.shade600),
-                        ),
-                        title: Text('Update Rates',
-                            style: GoogleFonts.inter(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color:
-                                Theme.of(context).colorScheme.onSurface)),
-                        subtitle: Text(
-                            'Last updated: ${CurrencyService.getLastUpdatedText()}',
-                            style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant)),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.refresh),
-                          onPressed: () async {
-                            final success = await CurrencyService.updateRates();
-                            if (success) {
-                              setSheetState(() {});
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content:
-                                      Text('Rates updated successfully')),
-                                );
-                              }
-                            } else {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text('Failed to update rates')),
-                                );
-                              }
-                            }
-                          },
-                        ),
-                      ),
-                    ],
-                  );
-                }),
-                const SizedBox(height: 8),
-
-                ListTile(
-                  contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                        color: Colors.teal.shade50,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Icon(Icons.sync_problem, color: Colors.teal.shade600),
-                  ),
-                  title: Text('Re-sync Data',
-                      style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface)),
-                  subtitle: Text('Recompute balances from history',
-                      style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  onTap: () {
-                    Navigator.pop(ctx); // Close the bottom sheet
-                    _promptReSync(context); // Open prompt
-                  },
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-
-                const SizedBox(height: 8),
-
-                ListTile(
-                  contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                        color: Colors.deepPurple.shade50,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Icon(Icons.repeat, color: Colors.deepPurple.shade600),
-                  ),
-                  title: Text('Recurring Transactions',
-                      style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface)),
-                  subtitle: Text('Manage automated entries & amounts',
-                      style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const RecurringTransactionsScreen(),
-                      ),
-                    );
-                  },
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-
-                const SizedBox(height: 8),
-
-                // Enhanced Switch Account Option
-                ListTile(
-                  contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: const Icon(Icons.switch_account_outlined,
-                        color: Color(0xFF2563EB)),
-                  ),
-                  title: Text('Switch Account',
-                      style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface)),
-                  subtitle: Text('Login with a different email',
-                      style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color:
-                          Theme.of(context).colorScheme.onSurfaceVariant)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _switchAccount(context);
-                  },
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-
-                const SizedBox(height: 8),
-
-                ListTile(
-                  contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Icon(Icons.logout, color: Colors.red.shade600),
-                  ),
-                  title: Text('Sign Out',
-                      style: GoogleFonts.inter(
-                          fontSize: 16,
-                          color: Colors.red.shade700,
-                          fontWeight: FontWeight.w600)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _signOut(context);
-                  },
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                const SizedBox(height: 8),
-
-                ListTile(
-                  contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Icon(Icons.delete_forever, color: Colors.red.shade600),
-                  ),
-                  title: Text('Delete All Data',
-                      style: GoogleFonts.inter(
-                          fontSize: 16,
-                          color: Colors.red.shade700,
-                          fontWeight: FontWeight.w600)),
-                  subtitle: Text('Irreversibly wipe all account records',
-                      style: GoogleFonts.inter(
-                          fontSize: 12, color: Colors.red.shade300)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _deleteAccountData(context);
-                  },
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        );
-      },
-    );
   }
 
   @override
@@ -2047,7 +1442,7 @@ class _DashboardTabState extends State<DashboardTab> {
         actions: [
           if (_user != null) ...[
             GestureDetector(
-              onTap: () => _showProfileOptions(context),
+              onTap: widget.onProfileTap,
               child: Container(
                 margin: const EdgeInsets.only(right: 16),
                 decoration: BoxDecoration(
@@ -2067,11 +1462,6 @@ class _DashboardTabState extends State<DashboardTab> {
                 ),
               ),
             ),
-          ] else ...[
-            TextButton(
-              onPressed: () => _signOut(context),
-              child: const Text("Sign In"),
-            )
           ]
         ],
       ),
@@ -2503,6 +1893,18 @@ class _TransactionsTabState extends State<TransactionsTab> {
                 fontWeight: FontWeight.bold,
                 color: Theme.of(context).colorScheme.onSurface)),
         actions: [
+          // Added highly discoverable Quick-Access for Recurring Transactions in AppBar!
+          IconButton(
+            icon: const Icon(Icons.repeat),
+            tooltip: 'Recurring Transactions',
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const RecurringTransactionsScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: Icon(_isSearchVisible ? Icons.close : Icons.search),
             color: Colors.blueGrey.shade700,
@@ -3589,261 +2991,477 @@ class BarChartPainter extends CustomPainter {
   bool shouldRepaint(covariant BarChartPainter oldDelegate) => true;
 }
 
-// --- 7. Categories Tab ---
+// --- 7. Settings Tab (NEW) ---
 
-class CategoriesTab extends StatefulWidget {
-  final Map<String, List<String>> categories;
-
-  const CategoriesTab({super.key, required this.categories});
+class SettingsTab extends StatefulWidget {
+  const SettingsTab({super.key});
 
   @override
-  State<CategoriesTab> createState() => _CategoriesTabState();
+  State<SettingsTab> createState() => _SettingsTabState();
 }
 
-class _CategoriesTabState extends State<CategoriesTab> {
-  void _updateCategories(Map<String, List<String>> newCats) {
-    final user = AuthService.currentUser;
-    if (user != null) {
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('settings')
-          .doc('categories')
-          .set({'data': newCats});
+class _SettingsTabState extends State<SettingsTab> {
+  final User? _user = AuthService.currentUser;
+
+  void _signOut() async {
+    await AuthService.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+            (route) => false,
+      );
     }
   }
 
-  void _addCategory() {
-    TextEditingController ctrl = TextEditingController();
+  void _switchAccount() async {
+    await AuthService.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+            (route) => false,
+      );
+    }
+  }
+
+  void _deleteAccountData() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("New Category"),
-        content: TextField(
-            controller: ctrl,
-            decoration: const InputDecoration(hintText: "Category Name"),
-            autofocus: true),
+        title: Text('Delete All Data?',
+            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        content: Text(
+            'This will permanently delete all your transactions, accounts, and settings. This action cannot be undone.',
+            style: GoogleFonts.inter()),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.inter(color: Colors.grey)),
+          ),
           TextButton(
-              onPressed: () {
-                if (ctrl.text.isNotEmpty) {
-                  final newCats =
-                  Map<String, List<String>>.from(widget.categories);
-                  newCats[ctrl.text] = [];
-                  _updateCategories(newCats);
-                  Navigator.pop(ctx);
-                }
-              },
-              child: const Text("Add")),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+
+              await AuthService.deleteUserData();
+
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("All data deleted successfully")),
+                );
+              }
+            },
+            child: Text('Delete Everything',
+                style: GoogleFonts.inter(
+                    color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
         ],
       ),
     );
   }
 
-  void _addSubCategory(String category) {
-    TextEditingController ctrl = TextEditingController();
+  Future<void> _reSyncData() async {
+    final user = AuthService.currentUser;
+    if (user == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final userDoc = firestore.collection('users').doc(user.uid);
+
+      final accountsSnap = await userDoc.collection('accounts').get();
+      final transactionsSnap = await userDoc.collection('transactions').get();
+
+      Map<int, double> recalculatedBalances = {};
+
+      for (var doc in accountsSnap.docs) {
+        final data = doc.data();
+        final id = data['id'] as int;
+        final double initialBal = data.containsKey('initialBalance')
+            ? EncryptionService.decryptDouble(data['initialBalance'])
+            : 0.0;
+        recalculatedBalances[id] = initialBal;
+      }
+
+      for (var doc in transactionsSnap.docs) {
+        final data = doc.data();
+        final t = Transaction.fromMap(data);
+
+        if (recalculatedBalances.containsKey(t.sourceAccountId)) {
+          if (t.type == TransactionType.income) {
+            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! + t.amount;
+          } else if (t.type == TransactionType.expense || t.type == TransactionType.investment) {
+            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! - t.amount;
+          } else if (t.type == TransactionType.transfer) {
+            recalculatedBalances[t.sourceAccountId] = recalculatedBalances[t.sourceAccountId]! - (t.amount + t.fee);
+          }
+        }
+
+        if (t.type == TransactionType.transfer && t.targetAccountId != null) {
+          if (recalculatedBalances.containsKey(t.targetAccountId)) {
+            recalculatedBalances[t.targetAccountId!] = recalculatedBalances[t.targetAccountId!]! + t.amount;
+          }
+        }
+      }
+
+      final batch = firestore.batch();
+      for (var doc in accountsSnap.docs) {
+        final data = doc.data();
+        final id = data['id'] as int;
+        if (recalculatedBalances.containsKey(id)) {
+          batch.update(doc.reference, {
+            'balance': EncryptionService.encryptDouble(recalculatedBalances[id]!)
+          });
+        }
+      }
+
+      await batch.commit();
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Data re-synced successfully!")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error re-syncing data: $e")),
+        );
+      }
+    }
+  }
+
+  void _promptReSync() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text("Add to $category"),
-        content: TextField(
-            controller: ctrl,
-            decoration: const InputDecoration(hintText: "Sub-Category Name"),
-            autofocus: true),
+        title: Text('Re-sync Data',
+            style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        content: Text(
+            'This will recalculate all your account balances from scratch using your transaction history and Opening Balances.\n\n⚠️ IMPORTANT: If your account had a starting balance but you didn\'t explicitly set an "Opening Balance" for it yet, please cancel this, go to the Accounts tab, long-press your account to edit it, and set your Opening Balance first.',
+            style: GoogleFonts.inter(fontSize: 14)),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.inter(color: Colors.grey)),
+          ),
           TextButton(
-              onPressed: () {
-                if (ctrl.text.isNotEmpty) {
-                  final newCats =
-                  Map<String, List<String>>.from(widget.categories);
-                  newCats[category] = List.from(newCats[category]!)
-                    ..add(ctrl.text);
-                  _updateCategories(newCats);
-                  Navigator.pop(ctx);
-                }
-              },
-              child: const Text("Add")),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _reSyncData();
+            },
+            child: Text('Re-sync Data',
+                style: GoogleFonts.inter(
+                    color: Colors.teal, fontWeight: FontWeight.bold)),
+          ),
         ],
       ),
     );
   }
 
-  void _editCategory(String oldName) {
-    TextEditingController ctrl = TextEditingController(text: oldName);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Edit Category"),
-        content: TextField(
-            controller: ctrl,
-            decoration: const InputDecoration(hintText: "Name"),
-            autofocus: true),
-        actions: [
-          TextButton(
-              onPressed: () {
-                showDialog(
-                    context: context,
-                    builder: (c) => AlertDialog(
-                      title: const Text("Delete Category?"),
-                      content: const Text(
-                          "This will delete the category and all sub-categories options."),
-                      actions: [
-                        TextButton(
-                            onPressed: () => Navigator.pop(c),
-                            child: const Text("Cancel")),
-                        TextButton(
-                            onPressed: () {
-                              final newCats =
-                              Map<String, List<String>>.from(
-                                  widget.categories);
-                              newCats.remove(oldName);
-                              _updateCategories(newCats);
-                              Navigator.pop(c);
-                              Navigator.pop(ctx);
-                            },
-                            style: TextButton.styleFrom(
-                                foregroundColor: Colors.red),
-                            child: const Text("Delete")),
-                      ],
-                    ));
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text("Delete")),
-          TextButton(
-              onPressed: () {
-                if (ctrl.text.isNotEmpty && ctrl.text != oldName) {
-                  final newCats =
-                  Map<String, List<String>>.from(widget.categories);
-                  final subs = newCats.remove(oldName);
-                  newCats[ctrl.text] = subs!;
-                  _updateCategories(newCats);
-                  Navigator.pop(ctx);
-                }
-              },
-              child: const Text("Save")),
-        ],
-      ),
+  Widget _buildSection(String title, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 8, bottom: 8),
+          child: Text(title,
+              style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  letterSpacing: 1)),
+        ),
+        Container(
+          decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Theme.of(context).dividerColor)),
+          child: Column(
+            children: children.asMap().entries.map((entry) {
+              final int idx = entry.key;
+              final Widget child = entry.value;
+              if (idx == children.length - 1) return child;
+              return Column(
+                children: [
+                  child,
+                  Divider(
+                      height: 1,
+                      indent: 16,
+                      endIndent: 16,
+                      color: Theme.of(context).dividerColor.withOpacity(0.5))
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
     );
   }
 
-  void _editSubCategory(String category, String oldSub) {
-    TextEditingController ctrl = TextEditingController(text: oldSub);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Edit Sub-Category"),
-        content: TextField(
-            controller: ctrl,
-            decoration: const InputDecoration(hintText: "Name"),
-            autofocus: true),
-        actions: [
-          TextButton(
-              onPressed: () {
-                final newCats =
-                Map<String, List<String>>.from(widget.categories);
-                newCats[category] = List.from(newCats[category]!)
-                  ..remove(oldSub);
-                _updateCategories(newCats);
-                Navigator.pop(ctx);
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text("Delete")),
-          TextButton(
-              onPressed: () {
-                if (ctrl.text.isNotEmpty) {
-                  final newCats =
-                  Map<String, List<String>>.from(widget.categories);
-                  final list = List<String>.from(newCats[category]!);
-                  final idx = list.indexOf(oldSub);
-                  if (idx != -1) list[idx] = ctrl.text;
-                  newCats[category] = list;
-                  _updateCategories(newCats);
-                  Navigator.pop(ctx);
-                }
-              },
-              child: const Text("Save")),
-        ],
-      ),
+  Widget _icon(IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8)),
+      child: Icon(icon, color: color, size: 20),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Sort categories alphabetically
-    final sortedCategories = widget.categories.keys.toList()..sort();
-
     return Scaffold(
       appBar: AppBar(
-          title: Text('Categories',
-              style: GoogleFonts.inter(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface))),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addCategory,
-        backgroundColor: const Color(0xFF2563EB),
-        child: const Icon(Icons.add, color: Colors.white),
+        title: Text('Settings',
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface)),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: sortedCategories.map((cat) {
-          // Sort subcategories alphabetically
-          final subs = List<String>.from(widget.categories[cat]!)..sort();
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: Theme.of(context).dividerColor)),
-            child: ExpansionTile(
-              shape: const Border(),
-              collapsedShape: const Border(),
-              title: Text(cat,
-                  style: GoogleFonts.inter(
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSurface)),
-              trailing: IconButton(
-                  icon: const Icon(Icons.edit, size: 18),
-                  onPressed: () => _editCategory(cat)),
-              childrenPadding:
-              const EdgeInsets.only(left: 16, right: 16, bottom: 16),
-              expandedCrossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ...subs.map((sub) => GestureDetector(
-                      onLongPress: () => _editSubCategory(cat, sub),
-                      child: Chip(
-                        label: Text(sub,
-                            style: GoogleFonts.inter(fontSize: 14)),
-                        backgroundColor: Theme.of(context)
-                            .colorScheme
-                            .secondaryContainer,
-                        side: BorderSide.none,
-                      ),
-                    )),
-                    ActionChip(
-                      label:
-                      const Icon(Icons.add, size: 16, color: Colors.blue),
-                      backgroundColor: Theme.of(context).colorScheme.surface,
-                      side: BorderSide(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .primary
-                              .withOpacity(0.2)),
-                      onPressed: () => _addSubCategory(cat),
-                    )
-                  ],
-                )
-              ],
+        padding: const EdgeInsets.all(20),
+        children: [
+          // Profile Header
+          if (_user != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 32),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: Colors.blue.shade50,
+                    backgroundImage: _user!.photoURL != null
+                        ? NetworkImage(_user!.photoURL!)
+                        : null,
+                    child: _user!.photoURL == null
+                        ? Text(_user!.displayName?[0] ?? "U",
+                        style: GoogleFonts.inter(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700))
+                        : null,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_user!.displayName ?? 'User',
+                            style: GoogleFonts.inter(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color:
+                                Theme.of(context).colorScheme.onSurface)),
+                        Text(_user!.email ?? '',
+                            style: GoogleFonts.inter(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                                fontSize: 14)),
+                      ],
+                    ),
+                  )
+                ],
+              ),
             ),
-          );
-        }).toList(),
+
+          ValueListenableBuilder(
+            valueListenable: Hive.box('settings').listenable(),
+            builder: (context, box, _) {
+              String currentThemeMode =
+              box.get('themeMode', defaultValue: 'system');
+              String currentCurrency = box.get('currency', defaultValue: 'inr');
+              bool isBiometricEnabled =
+              box.get('isBiometricEnabled', defaultValue: false);
+
+              return _buildSection("PREFERENCES", [
+                ListTile(
+                  leading: _icon(Icons.dark_mode_outlined, Colors.purple),
+                  title: Text('App Theme',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  trailing: DropdownButton<String>(
+                    value: currentThemeMode,
+                    underline: const SizedBox(),
+                    items: ['light', 'dark', 'system'].map((m) {
+                      return DropdownMenuItem(
+                        value: m,
+                        child: Text(m[0].toUpperCase() + m.substring(1)),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) box.put('themeMode', val);
+                    },
+                  ),
+                ),
+                ListTile(
+                  leading: _icon(Icons.payments_outlined, Colors.orange),
+                  title: Text('Reference Currency',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  trailing: DropdownButton<String>(
+                    value: currentCurrency,
+                    underline: const SizedBox(),
+                    items: Currency.values.map((c) {
+                      return DropdownMenuItem(
+                        value: c.name,
+                        child: Text(c.label),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) box.put('currency', val);
+                    },
+                  ),
+                ),
+                ListTile(
+                  leading: _icon(Icons.fingerprint, Colors.green),
+                  title: Text('Biometric Lock',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  trailing: Switch(
+                    value: isBiometricEnabled,
+                    activeColor: const Color(0xFF2563EB),
+                    onChanged: (val) async {
+                      if (val) {
+                        bool canCheck =
+                        await BiometricAuthService.canCheckBiometrics();
+                        if (!canCheck) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      "Biometrics not available on this device")),
+                            );
+                          }
+                          return;
+                        }
+                        bool authenticated =
+                        await BiometricAuthService.authenticate();
+                        if (authenticated) {
+                          box.put('isBiometricEnabled', true);
+                        }
+                      } else {
+                        box.put('isBiometricEnabled', false);
+                      }
+                    },
+                  ),
+                ),
+              ]);
+            },
+          ),
+
+          _buildSection("FINANCIAL SETUP", [
+            ListTile(
+              leading: _icon(Icons.category_outlined, Colors.blue),
+              title: Text('Categories',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              subtitle: Text('Manage expense categories',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const CategoriesScreen()));
+              },
+            ),
+            ListTile(
+              leading: _icon(Icons.repeat, Colors.deepPurple),
+              title: Text('Recurring Transactions',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              subtitle: Text('Manage automated entries & amounts',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const RecurringTransactionsScreen()));
+              },
+            ),
+          ]),
+
+          _buildSection("DATA & SYNC", [
+            ListTile(
+              leading: _icon(Icons.sync, Colors.blue),
+              title: Text('Update Rates',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              subtitle: Text(
+                  'Last updated: ${CurrencyService.getLastUpdatedText()}',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              trailing: IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: () async {
+                  final success = await CurrencyService.updateRates();
+                  if (mounted) {
+                    setState(() {});
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text(success
+                              ? 'Rates updated successfully'
+                              : 'Failed to update rates')),
+                    );
+                  }
+                },
+              ),
+            ),
+            ListTile(
+              leading: _icon(Icons.sync_problem, Colors.teal),
+              title: Text('Re-sync Data',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              subtitle: Text('Recompute balances from history',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: _promptReSync,
+            ),
+          ]),
+
+          _buildSection("ACCOUNT", [
+            ListTile(
+              leading: _icon(Icons.switch_account_outlined, Colors.blue),
+              title: Text('Switch Account',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              onTap: _switchAccount,
+            ),
+            ListTile(
+              leading: _icon(Icons.logout, Colors.red),
+              title: Text('Sign Out',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600, color: Colors.red.shade700)),
+              onTap: _signOut,
+            ),
+            ListTile(
+              leading: _icon(Icons.delete_forever, Colors.red),
+              title: Text('Delete All Data',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600, color: Colors.red.shade700)),
+              onTap: _deleteAccountData,
+            ),
+          ]),
+
+          const SizedBox(height: 40),
+        ],
       ),
     );
   }
@@ -5647,6 +5265,301 @@ class RecurringTransactionsScreen extends StatelessWidget {
               ),
             );
           },
+        );
+      },
+    );
+  }
+}
+
+// --- 12. Categories Screen (Moved from Bottom Nav to Details Screen) ---
+
+class CategoriesScreen extends StatefulWidget {
+  const CategoriesScreen({super.key});
+
+  @override
+  State<CategoriesScreen> createState() => _CategoriesScreenState();
+}
+
+class _CategoriesScreenState extends State<CategoriesScreen> {
+  Map<String, List<String>> _currentCategories = {};
+
+  void _updateCategories(Map<String, List<String>> newCats) {
+    final user = AuthService.currentUser;
+    if (user != null) {
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('settings')
+          .doc('categories')
+          .set({'data': newCats});
+    }
+  }
+
+  void _addCategory() {
+    TextEditingController ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("New Category"),
+        content: TextField(
+            controller: ctrl,
+            decoration: const InputDecoration(hintText: "Category Name"),
+            autofocus: true),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          TextButton(
+              onPressed: () {
+                if (ctrl.text.isNotEmpty) {
+                  final newCats =
+                  Map<String, List<String>>.from(_currentCategories);
+                  newCats[ctrl.text] = [];
+                  _updateCategories(newCats);
+                  Navigator.pop(ctx);
+                }
+              },
+              child: const Text("Add")),
+        ],
+      ),
+    );
+  }
+
+  void _addSubCategory(String category) {
+    TextEditingController ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Add to $category"),
+        content: TextField(
+            controller: ctrl,
+            decoration: const InputDecoration(hintText: "Sub-Category Name"),
+            autofocus: true),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          TextButton(
+              onPressed: () {
+                if (ctrl.text.isNotEmpty) {
+                  final newCats =
+                  Map<String, List<String>>.from(_currentCategories);
+                  newCats[category] = List.from(newCats[category]!)
+                    ..add(ctrl.text);
+                  _updateCategories(newCats);
+                  Navigator.pop(ctx);
+                }
+              },
+              child: const Text("Add")),
+        ],
+      ),
+    );
+  }
+
+  void _editCategory(String oldName) {
+    TextEditingController ctrl = TextEditingController(text: oldName);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Edit Category"),
+        content: TextField(
+            controller: ctrl,
+            decoration: const InputDecoration(hintText: "Name"),
+            autofocus: true),
+        actions: [
+          TextButton(
+              onPressed: () {
+                showDialog(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: const Text("Delete Category?"),
+                      content: const Text(
+                          "This will delete the category and all sub-categories options."),
+                      actions: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(c),
+                            child: const Text("Cancel")),
+                        TextButton(
+                            onPressed: () {
+                              final newCats =
+                              Map<String, List<String>>.from(
+                                  _currentCategories);
+                              newCats.remove(oldName);
+                              _updateCategories(newCats);
+                              Navigator.pop(c);
+                              Navigator.pop(ctx);
+                            },
+                            style: TextButton.styleFrom(
+                                foregroundColor: Colors.red),
+                            child: const Text("Delete")),
+                      ],
+                    ));
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text("Delete")),
+          TextButton(
+              onPressed: () {
+                if (ctrl.text.isNotEmpty && ctrl.text != oldName) {
+                  final newCats =
+                  Map<String, List<String>>.from(_currentCategories);
+                  final subs = newCats.remove(oldName);
+                  newCats[ctrl.text] = subs!;
+                  _updateCategories(newCats);
+                  Navigator.pop(ctx);
+                }
+              },
+              child: const Text("Save")),
+        ],
+      ),
+    );
+  }
+
+  void _editSubCategory(String category, String oldSub) {
+    TextEditingController ctrl = TextEditingController(text: oldSub);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Edit Sub-Category"),
+        content: TextField(
+            controller: ctrl,
+            decoration: const InputDecoration(hintText: "Name"),
+            autofocus: true),
+        actions: [
+          TextButton(
+              onPressed: () {
+                final newCats =
+                Map<String, List<String>>.from(_currentCategories);
+                newCats[category] = List.from(newCats[category]!)
+                  ..remove(oldSub);
+                _updateCategories(newCats);
+                Navigator.pop(ctx);
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text("Delete")),
+          TextButton(
+              onPressed: () {
+                if (ctrl.text.isNotEmpty) {
+                  final newCats =
+                  Map<String, List<String>>.from(_currentCategories);
+                  final list = List<String>.from(newCats[category]!);
+                  final idx = list.indexOf(oldSub);
+                  if (idx != -1) list[idx] = ctrl.text;
+                  newCats[category] = list;
+                  _updateCategories(newCats);
+                  Navigator.pop(ctx);
+                }
+              },
+              child: const Text("Save")),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = AuthService.currentUser;
+    if (user == null) return const Scaffold();
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('settings')
+          .doc('categories')
+          .snapshots(),
+      builder: (context, snapshot) {
+        Map<String, List<String>> categories = {
+          'Food': ['Groceries', 'Restaurant', 'Snacks'],
+          'Bills': ['Rent', 'Electricity', 'Internet', 'Water', 'Phone'],
+          'Transport': ['Fuel', 'Taxi', 'Public', 'Repair'],
+          'Shopping': ['Clothes', 'Electronics', 'Home', 'Gifts'],
+          'Personal Care': ['Haircut', 'Beard', 'Salon', 'Spa', 'Cosmetics'],
+          'Skill Dev': ['Dance Class', 'Violin Class', 'Course', 'Workshop'],
+          'Investment': ['Mutual Funds', 'Stocks', 'FD', 'Gold', 'SIP'],
+          'Health': ['Medicine', 'Doctor', 'Insurance'],
+          'Entmt': ['Movies', 'Games', 'Events', 'Date'],
+        };
+
+        if (snapshot.hasData &&
+            snapshot.data != null &&
+            snapshot.data!.exists) {
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          if (data.containsKey('data')) {
+            categories = (data['data'] as Map).map((k, v) => MapEntry(
+                k.toString(), (v as List).map((e) => e.toString()).toList()));
+          }
+        }
+
+        _currentCategories = categories;
+        final sortedCategories = categories.keys.toList()..sort();
+
+        return Scaffold(
+          appBar: AppBar(
+              title: Text('Categories',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface))),
+          floatingActionButton: FloatingActionButton(
+            onPressed: _addCategory,
+            backgroundColor: const Color(0xFF2563EB),
+            child: const Icon(Icons.add, color: Colors.white),
+          ),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: sortedCategories.map((cat) {
+              final subs = List<String>.from(categories[cat]!)..sort();
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: BorderSide(color: Theme.of(context).dividerColor)),
+                child: ExpansionTile(
+                  shape: const Border(),
+                  collapsedShape: const Border(),
+                  title: Text(cat,
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface)),
+                  trailing: IconButton(
+                      icon: const Icon(Icons.edit, size: 18),
+                      onPressed: () => _editCategory(cat)),
+                  childrenPadding:
+                  const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                  expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ...subs.map((sub) => GestureDetector(
+                          onLongPress: () => _editSubCategory(cat, sub),
+                          child: Chip(
+                            label: Text(sub,
+                                style: GoogleFonts.inter(fontSize: 14)),
+                            backgroundColor: Theme.of(context)
+                                .colorScheme
+                                .secondaryContainer,
+                            side: BorderSide.none,
+                          ),
+                        )),
+                        ActionChip(
+                          label: const Icon(Icons.add,
+                              size: 16, color: Colors.blue),
+                          backgroundColor:
+                          Theme.of(context).colorScheme.surface,
+                          side: BorderSide(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withOpacity(0.2)),
+                          onPressed: () => _addSubCategory(cat),
+                        )
+                      ],
+                    )
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
         );
       },
     );
