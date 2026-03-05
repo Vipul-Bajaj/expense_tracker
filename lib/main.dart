@@ -1115,11 +1115,12 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
         if (nextDueDate.isAfter(today)) break;
 
         // Check if a transaction already exists for this recurrence on this specific date
-        // Logic: Same Category, Amount, Type, and Date (Year, Month, Day)
+        // Logic: Same Category, Type, Date (Year, Month, Day) and Note containing "(Recurring)"
+        // We drop the exact amount match so changing the parent amount doesn't spawn duplicates for past dates.
         bool exists = transactions.any((t) =>
-        t.amount == txn.amount &&
-            t.category == txn.category &&
+        t.category == txn.category &&
             t.type == txn.type &&
+            (t.note?.contains("(Recurring)") ?? false) &&
             t.date.year == nextDueDate.year &&
             t.date.month == nextDueDate.month &&
             t.date.day == nextDueDate.day);
@@ -1889,6 +1890,40 @@ class _DashboardTabState extends State<DashboardTab> {
                   onTap: () {
                     Navigator.pop(ctx); // Close the bottom sheet
                     _promptReSync(context); // Open prompt
+                  },
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+
+                const SizedBox(height: 8),
+
+                ListTile(
+                  contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: Colors.deepPurple.shade50,
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Icon(Icons.repeat, color: Colors.deepPurple.shade600),
+                  ),
+                  title: Text('Recurring Transactions',
+                      style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface)),
+                  subtitle: Text('Manage automated entries & amounts',
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const RecurringTransactionsScreen(),
+                      ),
+                    );
                   },
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
@@ -5438,8 +5473,6 @@ class RecurrenceFrequencyAdapter extends TypeAdapter<RecurrenceFrequency> {
       writer.writeByte(obj.index);
 }
 
-
-
 class TransactionSplitAdapter extends TypeAdapter<TransactionSplit> {
   @override
   final int typeId = 2;
@@ -5542,5 +5575,80 @@ class TransactionAdapter extends TypeAdapter<Transaction> {
 
     writer.writeBool(obj.note != null);
     if (obj.note != null) writer.writeString(obj.note!);
+  }
+}
+
+// --- 11. Recurring Transactions Screen ---
+
+class RecurringTransactionsScreen extends StatelessWidget {
+  const RecurringTransactionsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = AuthService.currentUser;
+    if (user == null) return const Scaffold();
+
+    final userDocRef =
+    FirebaseFirestore.instance.collection('users').doc(user.uid);
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: userDocRef.collection('accounts').snapshots(),
+      builder: (context, accountsSnapshot) {
+        final List<Account> accounts = accountsSnapshot.hasData
+            ? accountsSnapshot.data!.docs
+            .map((doc) =>
+            Account.fromMap(doc.data() as Map<String, dynamic>))
+            .toList()
+            : [];
+
+        return StreamBuilder<QuerySnapshot>(
+          stream: userDocRef.collection('transactions').snapshots(),
+          builder: (context, transactionsSnapshot) {
+            final List<Transaction> transactions = transactionsSnapshot.hasData
+                ? transactionsSnapshot.data!.docs
+                .map((doc) =>
+                Transaction.fromMap(doc.data() as Map<String, dynamic>))
+                .toList()
+                : [];
+
+            // Filter only the parent transactions that have an active recurrence
+            final recurringTxns = transactions
+                .where((t) => t.recurrence != RecurrenceFrequency.none)
+                .toList();
+
+            recurringTxns.sort((a, b) => b.date.compareTo(a.date));
+
+            return Scaffold(
+              appBar: AppBar(
+                title: Text('Recurring Transactions',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface)),
+              ),
+              body: recurringTxns.isEmpty
+                  ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.repeat, size: 48, color: Colors.blueGrey.shade200),
+                    const SizedBox(height: 16),
+                    Text("No active recurring transactions.",
+                        style: GoogleFonts.inter(color: Colors.blueGrey.shade400)),
+                  ],
+                ),
+              )
+                  : ListView.builder(
+                padding: const EdgeInsets.all(20),
+                itemCount: recurringTxns.length,
+                itemBuilder: (ctx, i) => TransactionItem(
+                  transaction: recurringTxns[i],
+                  accounts: accounts,
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }
