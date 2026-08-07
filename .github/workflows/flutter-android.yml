@@ -57,6 +57,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
-          path: build/app/outputs/flutter-apk/app-release.apkgit add .
-git commit -m "Add Flutter Android CI"
-git push
+          path: build/app/outputs/flutter-apk/app-release.apk
