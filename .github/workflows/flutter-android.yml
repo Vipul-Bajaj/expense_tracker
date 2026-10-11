@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -53,8 +53,50 @@ jobs:
       - name: Build Release APK
         run: flutter build apk --release
 
-      - name: Upload APK
+      - name: Prepare APK for distribution
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk expense-tracker.apk
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: expense-tracker.apk
+
+      - name: Publish Direct APK Download & QR Code
+        if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/expense-tracker.apk"
+          QR_URL="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${DOWNLOAD_URL}"
+
+          if [ "$TAG_NAME" = "latest" ]; then
+            # Clean up prior rolling release to ensure the download link points to the newest build
+            gh release delete latest --yes --cleanup-tag || true
+            gh release create latest expense-tracker.apk \
+              --title "Latest Development Build" \
+              --notes "### 📱 Direct Download for Physical Devices
+          - 📥 **Direct APK:** [Download expense-tracker.apk](${DOWNLOAD_URL})
+
+          #### Scan with phone camera to download directly:
+          <img src=\"${QR_URL}\" width=\"250\" height=\"250\" alt=\"Download QR Code\" />
+
+          ---
+          *Built automatically from commit ${{ github.sha }}*" \
+              --prerelease
+          else
+            gh release create "$TAG_NAME" expense-tracker.apk \
+              --title "Release $TAG_NAME" \
+              --generate-notes
+          fi
+
+          # Add direct download link and QR code to GitHub Actions Summary
+          echo "## 📱 Direct Build for Physical Device" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📥 **[Download expense-tracker.apk](${DOWNLOAD_URL})**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Scan this QR code with your phone camera to download directly:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<img src=\"${QR_URL}\" width=\"220\" height=\"220\" alt=\"Download QR Code\" />" >> $GITHUB_STEP_SUMMARY
