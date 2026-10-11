@@ -101,6 +101,7 @@ modules.xml
 
 # Gradle cache
 .gradle/
+.kotlin/
 
 # Advanced Android/Flutter ignores
 **/android/.gradle/
