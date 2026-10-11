@@ -7,6 +7,7 @@ import 'package:encrypt/encrypt.dart' as enc;
 import 'package:expense_tracker/biometric_service.dart';
 import 'package:expense_tracker/currency_service.dart';
 import 'package:expense_tracker/firebase_options.dart';
+import 'package:expense_tracker/notification_tracking_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -517,6 +518,81 @@ class AuthService {
 
 // --- MAIN ENTRY POINT ---
 
+Future<void> _handleApprovedNotificationTransaction(
+  DetectedTransaction txn, {
+  String? category,
+  int? accountId,
+  String? notes,
+}) async {
+  final user = AuthService.currentUser;
+  if (user == null) {
+    debugPrint("Cannot save approved transaction: user not authenticated.");
+    return;
+  }
+
+  try {
+    final firestore = FirebaseFirestore.instance;
+    final userDoc = firestore.collection('users').doc(user.uid);
+
+    final accountsSnap = await userDoc.collection('accounts').get();
+    if (accountsSnap.docs.isEmpty) {
+      debugPrint("No accounts found to assign auto-detected transaction.");
+      return;
+    }
+
+    final accounts = accountsSnap.docs
+        .map((d) => Account.fromMap(d.data()))
+        .toList();
+
+    Account? targetAccount;
+    if (accountId != null) {
+      targetAccount = accounts.firstWhere(
+        (a) => a.id == accountId,
+        orElse: () => accounts.first,
+      );
+    } else {
+      final searchLower = txn.accountName.toLowerCase();
+      targetAccount = accounts.firstWhere(
+        (a) =>
+            searchLower.contains(a.name.toLowerCase()) ||
+            a.name.toLowerCase().contains(searchLower),
+        orElse: () => accounts.first,
+      );
+    }
+
+    final isExpense = txn.type == DetectedTransactionType.expense;
+    final double newBalance = isExpense
+        ? targetAccount.balance - txn.amount
+        : targetAccount.balance + txn.amount;
+
+    final newTxn = Transaction(
+      id: txn.id,
+      amount: txn.amount,
+      fee: 0.0,
+      type: isExpense ? TransactionType.expense : TransactionType.income,
+      sourceAccountId: targetAccount.id,
+      category: category ?? txn.category,
+      subCategory: null,
+      date: txn.timestamp,
+      note: notes ?? (txn.payee.isNotEmpty ? txn.payee : null),
+    );
+
+    final batch = firestore.batch();
+    final accRef = userDoc.collection('accounts').doc(targetAccount.id.toString());
+    batch.update(accRef, {
+      'balance': EncryptionService.encryptDouble(newBalance),
+    });
+
+    final txnRef = userDoc.collection('transactions').doc(newTxn.id);
+    batch.set(txnRef, newTxn.toMap());
+
+    await batch.commit();
+    debugPrint("Auto-detected transaction ${txn.id} successfully saved to Firestore.");
+  } catch (e) {
+    debugPrint("Error committing approved notification transaction: $e");
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -540,6 +616,15 @@ void main() async {
 
   await Hive.openBox('settings');
   final expensesBox = await Hive.openBox('expenses_db');
+
+  // Initialize Notification Tracking Service
+  try {
+    await NotificationTrackingService.initialize();
+    NotificationTrackingService.onTransactionApproved =
+        _handleApprovedNotificationTransaction;
+  } catch (e) {
+    debugPrint("NotificationTrackingService init error: $e");
+  }
 
   runApp(const ExpenseTrackerApp());
 }
@@ -1717,6 +1802,14 @@ class _DashboardTabState extends State<DashboardTab> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          ValueListenableBuilder<List<DetectedTransaction>>(
+            valueListenable:
+                NotificationTrackingService.pendingTransactionsNotifier,
+            builder: (context, pendingList, _) {
+              if (pendingList.isEmpty) return const SizedBox.shrink();
+              return _buildPendingTransactionsSection(context, pendingList);
+            },
+          ),
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
@@ -1844,6 +1937,321 @@ class _DashboardTabState extends State<DashboardTab> {
             ...monthlyTransactions.take(10).map((txn) =>
                 TransactionItem(transaction: txn, accounts: widget.accounts)),
           const SizedBox(height: 80),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPendingTransactionsSection(
+      BuildContext context, List<DetectedTransaction> pendingList) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFF2563EB).withOpacity(0.35),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF2563EB).withOpacity(0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB).withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.auto_awesome,
+                      size: 18, color: Color(0xFF2563EB)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'Detected Payments',
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2563EB),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              '${pendingList.length} new',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        'Tap to review or approve into your records',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(
+            height: 1,
+            color: theme.dividerColor.withOpacity(0.5),
+          ),
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: pendingList.length,
+            separatorBuilder: (_, __) => Divider(
+              height: 1,
+              indent: 16,
+              endIndent: 16,
+              color: theme.dividerColor.withOpacity(0.4),
+            ),
+            itemBuilder: (context, index) {
+              final txn = pendingList[index];
+              final isExpense = txn.type == DetectedTransactionType.expense;
+
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: isExpense
+                                ? Colors.red.shade50
+                                : Colors.green.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            isExpense
+                                ? Icons.arrow_upward_rounded
+                                : Icons.arrow_downward_rounded,
+                            color: isExpense
+                                ? Colors.red.shade700
+                                : Colors.green.shade700,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                txn.payee,
+                                style: GoogleFonts.inter(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? Colors.white10
+                                          : Colors.grey.shade200,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      txn.accountName,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color:
+                                            theme.colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade50,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      txn.category,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.blue.shade700,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    DateFormat('dd MMM, hh:mm a')
+                                        .format(txn.timestamp),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${isExpense ? '-' : '+'}${FinanceCalculator.getSelectedCurrencySymbol()} ${txn.amount.toStringAsFixed(2)}',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: isExpense
+                                ? Colors.red.shade600
+                                : Colors.green.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              await NotificationTrackingService
+                                  .approveTransaction(txn.id);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        'Added ₹${txn.amount.toStringAsFixed(0)} to ${txn.category}!'),
+                                    backgroundColor: Colors.green.shade700,
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF2563EB),
+                              foregroundColor: Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              elevation: 0,
+                            ),
+                            icon: const Icon(Icons.check, size: 16),
+                            label: Text(
+                              'Quick Add',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              if (widget.accounts.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Please add an account first!'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                                return;
+                              }
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                backgroundColor: Colors.transparent,
+                                builder: (_) => AddTransactionSheet(
+                                  accounts: widget.accounts,
+                                  detectedTransaction: txn,
+                                ),
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            label: Text(
+                              'Edit & Add',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: () async {
+                            await NotificationTrackingService
+                                .dismissTransaction(txn.id);
+                          },
+                          icon: const Icon(Icons.close, size: 18),
+                          tooltip: 'Dismiss',
+                          visualDensity: VisualDensity.compact,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -3537,9 +3945,16 @@ class _SettingsTabState extends State<SettingsTab> {
               box.get('themeMode', defaultValue: 'system');
               String currentCurrency = box.get('currency', defaultValue: 'inr');
               bool isBiometricEnabled =
-              box.get('isBiometricEnabled', defaultValue: false);
+                  box.get('isBiometricEnabled', defaultValue: false);
+              bool isAutoDetectEnabled =
+                  box.get('autoDetectTransactions', defaultValue: false);
+              bool isAutoApproveEnabled =
+                  box.get('autoApproveTransactions', defaultValue: false);
 
-              return _buildSection("PREFERENCES", [
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSection("PREFERENCES", [
                 ListTile(
                   leading: _icon(Icons.dark_mode_outlined, Colors.purple),
                   title: Text('App Theme',
@@ -3643,9 +4058,180 @@ class _SettingsTabState extends State<SettingsTab> {
                     },
                   ),
                 ),
-              ]);
-            },
-          ),
+              ]),
+              _buildSection("AUTOMATION (UPI & CARDS)", [
+                ListTile(
+                  leading: _icon(Icons.notifications_active_outlined, Colors.teal),
+                  title: Text('Auto-Detect Payments',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    isAutoDetectEnabled
+                        ? 'Active — capturing GPay, PhonePe, Paytm, Bank SMS'
+                        : 'Auto-log payments from bank & UPI notifications',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                  trailing: Switch(
+                    value: isAutoDetectEnabled,
+                    activeColor: const Color(0xFF2563EB),
+                    onChanged: (val) async {
+                      if (val) {
+                        final hasPermission =
+                            await NotificationTrackingService.isPermissionGranted();
+                        if (!hasPermission) {
+                          if (context.mounted) {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: Text('Notification Access Needed',
+                                    style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.bold)),
+                                content: Text(
+                                  'To automatically ingest UPI and card payments, Expense Tracker needs permission to read payment notifications from apps like Google Pay, PhonePe, Paytm, and your bank.\n\nPlease enable "Expense Tracker" on the next screen.',
+                                  style: GoogleFonts.inter(fontSize: 14),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: Text('Cancel',
+                                        style: GoogleFonts.inter(
+                                            color: Colors.grey)),
+                                  ),
+                                  TextButton(
+                                    onPressed: () async {
+                                      Navigator.pop(ctx);
+                                      await NotificationTrackingService
+                                          .requestPermission();
+                                      final granted =
+                                          await NotificationTrackingService
+                                              .isPermissionGranted();
+                                      if (granted) {
+                                        await box.put(
+                                            'autoDetectTransactions', true);
+                                        NotificationTrackingService
+                                            .startListening();
+                                      }
+                                    },
+                                    child: Text('Open Settings',
+                                        style: GoogleFonts.inter(
+                                            color: const Color(0xFF2563EB),
+                                            fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                          return;
+                        }
+                        await box.put('autoDetectTransactions', true);
+                        NotificationTrackingService.startListening();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content:
+                                  Text("Auto-detection active and listening."),
+                            ),
+                          );
+                        }
+                      } else {
+                        await box.put('autoDetectTransactions', false);
+                        NotificationTrackingService.stopListening();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Auto-detection disabled."),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ),
+                ListTile(
+                  leading: _icon(Icons.bolt, Colors.amber.shade800),
+                  title: Text('Auto-Add Directly',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    'Skip manual review and directly record detected payments',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                  enabled: isAutoDetectEnabled,
+                  trailing: Switch(
+                    value: isAutoApproveEnabled,
+                    activeColor: const Color(0xFF2563EB),
+                    onChanged: isAutoDetectEnabled
+                        ? (val) async {
+                            await box.put('autoApproveTransactions', val);
+                          }
+                        : null,
+                  ),
+                ),
+                ListTile(
+                  leading: _icon(Icons.play_circle_outline, Colors.blue),
+                  title: Text('Simulate Test Payment',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                      'Simulate a ₹249 Swiggy payment to test detection',
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant)),
+                  trailing: OutlinedButton(
+                    onPressed: () async {
+                      await NotificationTrackingService.simulateTransaction(
+                        amount: 249.0,
+                        payee: 'Swiggy',
+                        category: 'Food',
+                        accountName: 'Google Pay',
+                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                "Simulated ₹249 Swiggy payment! Check your Dashboard."),
+                            backgroundColor: Color(0xFF2563EB),
+                          ),
+                        );
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text('Test', style: GoogleFonts.inter(fontSize: 12)),
+                  ),
+                ),
+                ListTile(
+                  leading: _icon(
+                      Icons.cleaning_services_outlined, Colors.red.shade400),
+                  title: Text('Clear Detected Cache',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  subtitle: Text('Clear pending transaction review list',
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant)),
+                  onTap: () async {
+                    await NotificationTrackingService.clearAll();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text("Cleared detected transactions.")),
+                      );
+                    }
+                  },
+                ),
+              ]),
+            ],
+          );
+        },
+      ),
 
           _buildSection("FINANCIAL SETUP", [
             ListTile(
@@ -4422,9 +5008,14 @@ class _AddAccountSheetState extends State<AddAccountSheet> {
 class AddTransactionSheet extends StatefulWidget {
   final List<Account> accounts;
   final Transaction? existingTransaction;
+  final DetectedTransaction? detectedTransaction;
 
-  const AddTransactionSheet(
-      {super.key, required this.accounts, this.existingTransaction});
+  const AddTransactionSheet({
+    super.key,
+    required this.accounts,
+    this.existingTransaction,
+    this.detectedTransaction,
+  });
 
   @override
   State<AddTransactionSheet> createState() => _AddTransactionSheetState();
@@ -4500,6 +5091,25 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
           subCategory: s.subCategory,
           amount: FinanceCalculator.convertFromBase(s.amount),
         )));
+      }
+    } else if (widget.detectedTransaction != null) {
+      final dt = widget.detectedTransaction!;
+      _selectedType = dt.type == DetectedTransactionType.expense
+          ? TransactionType.expense
+          : TransactionType.income;
+      _amountCtrl.text = dt.amount.toStringAsFixed(2);
+      _noteCtrl.text = dt.payee;
+      _selectedCategory = dt.category;
+      _selectedDate = dt.timestamp;
+
+      final searchLower = dt.accountName.toLowerCase();
+      final matched = widget.accounts.where(
+        (a) =>
+            searchLower.contains(a.name.toLowerCase()) ||
+            a.name.toLowerCase().contains(searchLower),
+      );
+      if (matched.isNotEmpty) {
+        _selectedSourceId = matched.first.id;
       }
     }
   }
@@ -4669,7 +5279,9 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     });
 
     final newTxn = Transaction(
-      id: widget.existingTransaction?.id ?? DateTime.now().toString(),
+      id: widget.existingTransaction?.id ??
+          widget.detectedTransaction?.id ??
+          DateTime.now().toString(),
       amount: amount,
       fee: fee,
       type: _selectedType,
@@ -4702,6 +5314,12 @@ class _AddTransactionSheetState extends State<AddTransactionSheet> {
     batch.set(txnRef, newTxn.toMap());
 
     await batch.commit();
+
+    if (widget.detectedTransaction != null) {
+      await NotificationTrackingService.markAsApproved(
+          widget.detectedTransaction!.id);
+    }
+
     if (mounted) Navigator.pop(context);
   }
 

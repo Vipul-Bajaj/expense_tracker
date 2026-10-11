@@ -1,7 +1,5 @@
 import 'dart:math';
-import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
 import 'package:flutter_test/flutter_test.dart';
-// REPLACE 'expense_tracker' with your actual package name from pubspec.yaml if different
 import 'package:expense_tracker/main.dart';
 
 void main() {
@@ -303,7 +301,9 @@ void main() {
       final accounts = [Account(id: 1, name: 'Bank', balance: 0, type: AccountType.bank, createdDate: DateTime.now())];
 
       final breakdown = FinanceCalculator.calculateBreakdown(
-          transactions: txns, accounts: accounts, byCategory: true);
+          transactions: txns,
+          accounts: accounts,
+          reportType: ReportType.category);
 
       expect(breakdown['Food'], 70.0);
       expect(breakdown['Transport'], 30.0);
@@ -327,7 +327,9 @@ void main() {
       final accounts = [Account(id: 1, name: 'Bank', balance: 0, type: AccountType.bank, createdDate: DateTime.now())];
 
       final breakdown = FinanceCalculator.calculateBreakdown(
-          transactions: txns, accounts: accounts, byCategory: true);
+          transactions: txns,
+          accounts: accounts,
+          reportType: ReportType.category);
 
       expect(breakdown['Food'], 60.0);
       expect(breakdown['Entertainment - Movie'], 40.0);
@@ -346,7 +348,9 @@ void main() {
       ];
 
       final breakdown = FinanceCalculator.calculateBreakdown(
-          transactions: txns, accounts: accounts, byCategory: false);
+          transactions: txns,
+          accounts: accounts,
+          reportType: ReportType.accountType);
 
       expect(breakdown['Bank'], 50.0);
       expect(breakdown['Wallet'], 30.0);
