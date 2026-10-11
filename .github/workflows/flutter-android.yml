@@ -23,6 +23,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore Firebase configuration
+        run: |
+          if [ ! -f lib/firebase_options.dart ]; then
+            git show 928675fa568ee9cead3b238e6b4da9b2e9e6236a:lib/firebase_options.dart > lib/firebase_options.dart 2>/dev/null || true
+          fi
+          if [ ! -f android/app/google-services.json ]; then
+            git show 9150318cb94ede316c5cdd9f88841072dd55f336:android/app/google-services.json > android/app/google-services.json 2>/dev/null || true
+          fi
 
       - name: Setup Java
         uses: actions/setup-java@v4
