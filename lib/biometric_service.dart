@@ -51,10 +51,7 @@ class BiometricAuthService {
           AndroidAuthMessages(
             signInTitle: 'Unlock Expense Tracker',
             cancelButton: 'Cancel',
-            biometricHint: 'Verify your fingerprint or face',
-            deviceCredentialsRequiredTitle: 'Screen Lock Required',
-            deviceCredentialsSetupDescription:
-                'Please set up a screen lock or biometric on your device.',
+            signInHint: 'Verify your fingerprint, face, or PIN',
           ),
         ],
         biometricOnly: false,
