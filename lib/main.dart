@@ -787,6 +787,7 @@ class WelcomeScreen extends StatefulWidget {
 
 class _WelcomeScreenState extends State<WelcomeScreen> {
   bool _isLoading = false;
+  bool _isBiometricLocked = false;
 
   @override
   void initState() {
@@ -801,37 +802,64 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final user = AuthService.currentUser;
     if (user != null) {
       // User is already logged in. Show branding for a moment then redirect.
-      // 1.5 seconds delay for a smooth welcome experience
       await Future.delayed(const Duration(milliseconds: 1500));
       if (!mounted) return;
 
       // Check for Biometric Lock
       final box = Hive.box('settings');
       final bool isBiometricEnabled =
-      box.get('isBiometricEnabled', defaultValue: false);
+          box.get('isBiometricEnabled', defaultValue: false);
 
       if (isBiometricEnabled) {
+        setState(() => _isBiometricLocked = true);
         final bool authenticated = await BiometricAuthService.authenticate();
         if (!authenticated) {
-          // If failed or cancelled, stay on welcome screen or show error.
-          // For security, checking again or just doing nothing (preventing access) is safest.
           if (mounted) {
+            setState(() {
+              _isBiometricLocked = true;
+              _isLoading = false;
+            });
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                  content: Text("Authentication failed. Please try again.")),
+                content: Text("Authentication required to unlock your finances."),
+              ),
             );
-            // Re-attempting or showing a specific button to retry would be better UX,
-            // but for now we just stop the flow.
-            return;
           }
+          return;
         }
       }
 
-      setState(() => _isLoading = true);
+      setState(() {
+        _isBiometricLocked = false;
+        _isLoading = true;
+      });
       await _migrateLocalData(user.uid);
       setState(() => _isLoading = false);
 
       if (mounted) _navigateToDashboard();
+    }
+  }
+
+  Future<void> _retryUnlock() async {
+    final user = AuthService.currentUser;
+    if (user == null) return;
+
+    final bool authenticated = await BiometricAuthService.authenticate();
+    if (authenticated) {
+      setState(() {
+        _isBiometricLocked = false;
+        _isLoading = true;
+      });
+      await _migrateLocalData(user.uid);
+      setState(() => _isLoading = false);
+      if (mounted) _navigateToDashboard();
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text("Authentication failed. Please try again.")),
+        );
+      }
     }
   }
 
@@ -981,7 +1009,58 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         color: Theme.of(context).colorScheme.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
-                if (!showLoginOptions) ...[
+                if (_isBiometricLocked) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'App is Locked',
+                    style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurface),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Biometric authentication is required to access your finances.',
+                    style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      onPressed: _retryUnlock,
+                      icon: const Icon(Icons.fingerprint),
+                      label: Text(
+                        'Unlock with Biometrics',
+                        style: GoogleFonts.inter(
+                            fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () async {
+                      await AuthService.signOut();
+                      if (mounted) {
+                        setState(() {
+                          _isBiometricLocked = false;
+                          _isLoading = false;
+                        });
+                      }
+                    },
+                    child: Text(
+                      'Sign in with another account',
+                      style: GoogleFonts.inter(fontSize: 14),
+                    ),
+                  ),
+                ] else if (!showLoginOptions) ...[
                   const SizedBox(height: 8),
                   Text(
                     'Loading your finances...',
@@ -1047,9 +1126,56 @@ class MainAppScaffold extends StatefulWidget {
   State<MainAppScaffold> createState() => _MainAppScaffoldState();
 }
 
-class _MainAppScaffoldState extends State<MainAppScaffold> {
+class _MainAppScaffoldState extends State<MainAppScaffold>
+    with WidgetsBindingObserver {
   int _currentIndex = 0;
   bool _recurrenceChecked = false;
+  bool _isBackgroundLocked = false;
+  bool _isAuthenticating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    final box = Hive.box('settings');
+    final bool isBiometricEnabled =
+        box.get('isBiometricEnabled', defaultValue: false);
+
+    if (!isBiometricEnabled) return;
+
+    if (state == AppLifecycleState.paused) {
+      if (mounted) {
+        setState(() {
+          _isBackgroundLocked = true;
+        });
+      }
+    } else if (state == AppLifecycleState.resumed && _isBackgroundLocked) {
+      _promptBiometricUnlock();
+    }
+  }
+
+  Future<void> _promptBiometricUnlock() async {
+    if (_isAuthenticating) return;
+    _isAuthenticating = true;
+    final bool authenticated = await BiometricAuthService.authenticate();
+    _isAuthenticating = false;
+    if (mounted && authenticated) {
+      setState(() {
+        _isBackgroundLocked = false;
+      });
+    }
+  }
 
   void _checkRecurringTransactions(List<Transaction> transactions,
       List<Account> accounts, String userId) async {
@@ -1220,6 +1346,73 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
                 (route) => false);
       });
       return const SizedBox();
+    }
+
+    if (_isBackgroundLocked) {
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.fingerprint,
+                      size: 64,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'App is Locked',
+                    style: GoogleFonts.inter(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Please authenticate with your fingerprint, face, or PIN to continue.',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      onPressed: _promptBiometricUnlock,
+                      icon: const Icon(Icons.lock_open),
+                      label: Text(
+                        'Unlock with Biometrics',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     final userDocRef =
@@ -3332,30 +3525,65 @@ class _SettingsTabState extends State<SettingsTab> {
                   leading: _icon(Icons.fingerprint, Colors.green),
                   title: Text('Biometric Lock',
                       style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    isBiometricEnabled
+                        ? 'Active — locks on app exit or background'
+                        : 'Protect your finances with biometrics',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
                   trailing: Switch(
                     value: isBiometricEnabled,
                     activeColor: const Color(0xFF2563EB),
                     onChanged: (val) async {
                       if (val) {
                         bool canCheck =
-                        await BiometricAuthService.canCheckBiometrics();
+                            await BiometricAuthService.canCheckBiometrics();
                         if (!canCheck) {
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                  content: Text(
-                                      "Biometrics not available on this device")),
+                                content: Text(
+                                    "Biometrics or screen lock is not set up on this device."),
+                              ),
                             );
                           }
                           return;
                         }
                         bool authenticated =
-                        await BiometricAuthService.authenticate();
+                            await BiometricAuthService.authenticate(
+                          localizedReason:
+                              'Authenticate to enable Biometric Lock',
+                        );
                         if (authenticated) {
-                          box.put('isBiometricEnabled', true);
+                          await box.put('isBiometricEnabled', true);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Biometric Lock enabled."),
+                              ),
+                            );
+                          }
+                        } else {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                    "Authentication cancelled or failed."),
+                              ),
+                            );
+                          }
                         }
                       } else {
-                        box.put('isBiometricEnabled', false);
+                        await box.put('isBiometricEnabled', false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Biometric Lock disabled."),
+                            ),
+                          );
+                        }
                       }
                     },
                   ),

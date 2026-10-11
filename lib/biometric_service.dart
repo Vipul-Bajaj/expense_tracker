@@ -1,17 +1,21 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 
 class BiometricAuthService {
   static final LocalAuthentication _auth = LocalAuthentication();
 
-  /// Checks if the device supports biometric authentication
+  /// Checks if the device supports biometric authentication or device credentials
   static Future<bool> canCheckBiometrics() async {
     try {
-      final bool canAuthenticateWithBiometrics = await _auth.canCheckBiometrics;
-      final bool canAuthenticate =
-          canAuthenticateWithBiometrics || await _auth.isDeviceSupported();
-      return canAuthenticate;
-    } on PlatformException catch (_) {
+      final bool isSupported = await _auth.isDeviceSupported();
+      final bool canCheck = await _auth.canCheckBiometrics;
+      return isSupported || canCheck;
+    } on PlatformException catch (e) {
+      debugPrint("BiometricAuthService canCheckBiometrics error: $e");
+      return false;
+    } catch (e) {
+      debugPrint("BiometricAuthService canCheckBiometrics unexpected error: $e");
       return false;
     }
   }
@@ -20,18 +24,40 @@ class BiometricAuthService {
   static Future<List<BiometricType>> getAvailableBiometrics() async {
     try {
       return await _auth.getAvailableBiometrics();
-    } on PlatformException catch (_) {
+    } on PlatformException catch (e) {
+      debugPrint("BiometricAuthService getAvailableBiometrics error: $e");
+      return <BiometricType>[];
+    } catch (e) {
+      debugPrint("BiometricAuthService getAvailableBiometrics unexpected error: $e");
       return <BiometricType>[];
     }
   }
 
-  /// Prompts the user to authenticate with biometrics
-  static Future<bool> authenticate() async {
+  /// Prompts the user to authenticate with biometrics or device PIN/pattern
+  static Future<bool> authenticate({
+    String localizedReason = 'Please authenticate to access your finances',
+  }) async {
     try {
+      final bool canAuthenticate = await canCheckBiometrics();
+      if (!canAuthenticate) {
+        debugPrint("BiometricAuthService: Device does not support biometric or device authentication.");
+        return false;
+      }
+
       return await _auth.authenticate(
-        localizedReason: 'Please authenticate to access your finances',
+        localizedReason: localizedReason,
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: false,
+          useErrorDialogs: true,
+          sensitiveTransaction: true,
+        ),
       );
-    } on PlatformException catch (_) {
+    } on PlatformException catch (e) {
+      debugPrint("BiometricAuthService authenticate error: $e");
+      return false;
+    } catch (e) {
+      debugPrint("BiometricAuthService authenticate unexpected error: $e");
       return false;
     }
   }
