@@ -1142,14 +1142,16 @@ class _MainAppScaffoldState extends State<MainAppScaffold>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // If biometric lock is enabled, lock immediately on startup and prompt for authentication
+    // If biometric lock is enabled, lock immediately on startup and prompt after window has focused
     final box = Hive.box('settings');
     final bool isBiometricEnabled =
         box.get('isBiometricEnabled', defaultValue: false);
     if (isBiometricEnabled) {
       _isBackgroundLocked = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _promptBiometricUnlock();
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted && _isBackgroundLocked) {
+          _promptBiometricUnlock();
+        }
       });
     }
   }
@@ -1177,8 +1179,8 @@ class _MainAppScaffoldState extends State<MainAppScaffold>
       }
     } else if (state == AppLifecycleState.resumed && _isBackgroundLocked) {
       // Delay slightly so the Android window manager establishes focus before launching BiometricPrompt
-      Future.delayed(const Duration(milliseconds: 200), () {
-        if (mounted && _isBackgroundLocked && !_isAuthenticating) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted && _isBackgroundLocked) {
           _promptBiometricUnlock();
         }
       });
@@ -1186,7 +1188,11 @@ class _MainAppScaffoldState extends State<MainAppScaffold>
   }
 
   Future<void> _promptBiometricUnlock() async {
-    if (_isAuthenticating) return;
+    if (_isAuthenticating) {
+      // Force cancel any previous stuck call so the user is never blocked
+      await BiometricAuthService.stopAuthentication();
+      _isAuthenticating = false;
+    }
     final box = Hive.box('settings');
     final bool isBiometricEnabled =
         box.get('isBiometricEnabled', defaultValue: false);
@@ -1197,7 +1203,9 @@ class _MainAppScaffoldState extends State<MainAppScaffold>
 
     _isAuthenticating = true;
     try {
+      debugPrint("Biometric: calling authenticate from _promptBiometricUnlock...");
       final bool authenticated = await BiometricAuthService.authenticate();
+      debugPrint("Biometric: authenticate finished with authenticated=$authenticated");
       if (mounted) {
         setState(() {
           _isBackgroundLocked = !authenticated;

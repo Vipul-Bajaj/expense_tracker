@@ -34,6 +34,16 @@ class BiometricAuthService {
     }
   }
 
+  /// Cancels any in-progress authentication
+  static Future<bool> stopAuthentication() async {
+    try {
+      return await _auth.stopAuthentication();
+    } catch (e) {
+      debugPrint("BiometricAuthService stopAuthentication error: $e");
+      return false;
+    }
+  }
+
   /// Prompts the user to authenticate with biometrics or device PIN/pattern
   static Future<bool> authenticate({
     String localizedReason = 'Please authenticate to access your finances',
@@ -45,7 +55,12 @@ class BiometricAuthService {
         return false;
       }
 
-      return await _auth.authenticate(
+      // Reset any stuck authentication before launching
+      try {
+        await _auth.stopAuthentication();
+      } catch (_) {}
+
+      final bool result = await _auth.authenticate(
         localizedReason: localizedReason,
         authMessages: const [
           AndroidAuthMessages(
@@ -58,8 +73,10 @@ class BiometricAuthService {
         sensitiveTransaction: false,
         persistAcrossBackgrounding: false,
       );
+      debugPrint("BiometricAuthService authenticate result: $result");
+      return result;
     } on PlatformException catch (e) {
-      debugPrint("BiometricAuthService authenticate error: $e");
+      debugPrint("BiometricAuthService authenticate PlatformException: ${e.code} - ${e.message}");
       return false;
     } catch (e) {
       debugPrint("BiometricAuthService authenticate unexpected error: $e");
