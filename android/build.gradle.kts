@@ -1,10 +1,10 @@
 plugins {
     id("com.google.gms.google-services") version "4.4.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
 
 allprojects {
-    ext.set("kotlin_version", "2.1.0")
+    ext.set("kotlin_version", "2.2.20")
     repositories {
         google()
         mavenCentral()
