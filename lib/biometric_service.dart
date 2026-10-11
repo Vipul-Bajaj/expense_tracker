@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:local_auth_android/local_auth_android.dart';
 
 class BiometricAuthService {
   static final LocalAuthentication _auth = LocalAuthentication();
@@ -46,9 +47,19 @@ class BiometricAuthService {
 
       return await _auth.authenticate(
         localizedReason: localizedReason,
+        authMessages: const [
+          AndroidAuthMessages(
+            signInTitle: 'Unlock Expense Tracker',
+            cancelButton: 'Cancel',
+            biometricHint: 'Verify your fingerprint or face',
+            deviceCredentialsRequiredTitle: 'Screen Lock Required',
+            deviceCredentialsSetupDescription:
+                'Please set up a screen lock or biometric on your device.',
+          ),
+        ],
         biometricOnly: false,
-        sensitiveTransaction: true,
-        persistAcrossBackgrounding: true,
+        sensitiveTransaction: false,
+        persistAcrossBackgrounding: false,
       );
     } on PlatformException catch (e) {
       debugPrint("BiometricAuthService authenticate error: $e");

@@ -471,6 +471,10 @@ class AuthService {
   }
 
   static Future<void> signOut() async {
+    try {
+      final box = Hive.box('settings');
+      await box.put('isBiometricEnabled', false);
+    } catch (_) {}
     await _googleSignIn.signOut();
     await _auth.signOut();
   }
@@ -1137,6 +1141,17 @@ class _MainAppScaffoldState extends State<MainAppScaffold>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // If biometric lock is enabled, lock immediately on startup and prompt for authentication
+    final box = Hive.box('settings');
+    final bool isBiometricEnabled =
+        box.get('isBiometricEnabled', defaultValue: false);
+    if (isBiometricEnabled) {
+      _isBackgroundLocked = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _promptBiometricUnlock();
+      });
+    }
   }
 
   @override
@@ -1154,26 +1169,44 @@ class _MainAppScaffoldState extends State<MainAppScaffold>
 
     if (!isBiometricEnabled) return;
 
-    if (state == AppLifecycleState.paused) {
-      if (mounted) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      if (!_isAuthenticating && mounted) {
         setState(() {
           _isBackgroundLocked = true;
         });
       }
     } else if (state == AppLifecycleState.resumed && _isBackgroundLocked) {
-      _promptBiometricUnlock();
+      // Delay slightly so the Android window manager establishes focus before launching BiometricPrompt
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted && _isBackgroundLocked && !_isAuthenticating) {
+          _promptBiometricUnlock();
+        }
+      });
     }
   }
 
   Future<void> _promptBiometricUnlock() async {
     if (_isAuthenticating) return;
+    final box = Hive.box('settings');
+    final bool isBiometricEnabled =
+        box.get('isBiometricEnabled', defaultValue: false);
+    if (!isBiometricEnabled) {
+      if (mounted) setState(() => _isBackgroundLocked = false);
+      return;
+    }
+
     _isAuthenticating = true;
-    final bool authenticated = await BiometricAuthService.authenticate();
-    _isAuthenticating = false;
-    if (mounted && authenticated) {
-      setState(() {
-        _isBackgroundLocked = false;
-      });
+    try {
+      final bool authenticated = await BiometricAuthService.authenticate();
+      if (mounted) {
+        setState(() {
+          _isBackgroundLocked = !authenticated;
+        });
+      }
+    } catch (e) {
+      debugPrint("Biometric unlock error: $e");
+    } finally {
+      _isAuthenticating = false;
     }
   }
 
@@ -1404,6 +1437,20 @@ class _MainAppScaffoldState extends State<MainAppScaffold>
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton.icon(
+                    onPressed: () async {
+                      await AuthService.signOut();
+                    },
+                    icon: const Icon(Icons.logout, size: 18),
+                    label: Text(
+                      'Sign out / Switch account',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
                   ),
