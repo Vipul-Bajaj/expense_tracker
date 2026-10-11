@@ -108,6 +108,7 @@ modules.xml
 **/build/
 android/local.properties
 *.keystore
+!android/app/debug.keystore
 *.jks
 key.properties
 *.priv

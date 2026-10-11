@@ -437,6 +437,7 @@ class AuthService {
     clientId: kIsWeb
         ? '505413136406-r1tkrv2kotevtsl0vjgc6oqgfao19bvd.apps.googleusercontent.com'
         : (Platform.isIOS ? DefaultFirebaseOptions.ios.iosClientId : null),
+    serverClientId: '505413136406-r1tkrv2kotevtsl0vjgc6oqgfao19bvd.apps.googleusercontent.com',
   );
 
   static User? get currentUser => _auth.currentUser;

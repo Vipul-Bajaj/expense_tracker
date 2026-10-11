@@ -90,6 +90,8 @@ jobs:
               --title "Latest Development Build" \
               --notes "### 📱 Direct Download for Physical Devices
           - 📥 **Direct APK:** [Download expense-tracker.apk](${DOWNLOAD_URL})
+          - 🔑 **SHA-1 Fingerprint:** \`4E:41:9E:8A:11:17:3D:B8:C6:FC:A0:8C:40:38:8B:41:D1:50:48:A3\`
+          - 🔑 **SHA-256 Fingerprint:** \`BD:69:D1:90:6B:EC:6C:5C:17:F9:E5:5B:77:B4:AB:33:FC:55:73:09:BC:0C:56:53:F1:D3:20:F7:FA:EF:3D:A2\`
 
           #### Scan with phone camera to download directly:
           <img src=\"${QR_URL}\" width=\"250\" height=\"250\" alt=\"Download QR Code\" />
@@ -107,6 +109,9 @@ jobs:
           echo "## 📱 Direct Build for Physical Device" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📥 **[Download expense-tracker.apk](${DOWNLOAD_URL})**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **SHA-1:** \`4E:41:9E:8A:11:17:3D:B8:C6:FC:A0:8C:40:38:8B:41:D1:50:48:A3\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **SHA-256:** \`BD:69:D1:90:6B:EC:6C:5C:17:F9:E5:5B:77:B4:AB:33:FC:55:73:09:BC:0C:56:53:F1:D3:20:F7:FA:EF:3D:A2\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Scan this QR code with your phone camera to download directly:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
