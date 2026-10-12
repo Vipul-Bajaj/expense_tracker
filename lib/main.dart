@@ -5,9 +5,11 @@ import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:encrypt/encrypt.dart' as enc;
 import 'package:expense_tracker/biometric_service.dart';
+import 'package:expense_tracker/budget_service.dart';
 import 'package:expense_tracker/currency_service.dart';
 import 'package:expense_tracker/firebase_options.dart';
 import 'package:expense_tracker/notification_tracking_service.dart';
+import 'package:expense_tracker/subscription_bills_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -626,6 +628,14 @@ void main() async {
     debugPrint("NotificationTrackingService init error: $e");
   }
 
+  // Initialize Budget and Subscription Services
+  try {
+    await BudgetService.initialize();
+    await SubscriptionBillsService.initialize();
+  } catch (e) {
+    debugPrint("Budget and Subscription init error: $e");
+  }
+
   runApp(const ExpenseTrackerApp());
 }
 
@@ -638,10 +648,13 @@ class ExpenseTrackerApp extends StatelessWidget {
       valueListenable: Hive.box('settings').listenable(),
       builder: (context, box, _) {
         final themeModeName = box.get('themeMode', defaultValue: 'system');
-        final ThemeMode themeMode = ThemeMode.values.firstWhere(
-              (t) => t.name == themeModeName,
-          orElse: () => ThemeMode.system,
-        );
+        final bool isAmoled = themeModeName == 'amoled';
+        final ThemeMode themeMode = isAmoled
+            ? ThemeMode.dark
+            : ThemeMode.values.firstWhere(
+                (t) => t.name == themeModeName,
+                orElse: () => ThemeMode.system,
+              );
 
         return MaterialApp(
           title: 'Expense Tracker',
@@ -666,13 +679,19 @@ class ExpenseTrackerApp extends StatelessWidget {
             colorScheme: ColorScheme.fromSeed(
               seedColor: const Color(0xFF2563EB),
               brightness: Brightness.dark,
+              surface: isAmoled ? const Color(0xFF121212) : const Color(0xFF1E293B),
             ),
             textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
-            scaffoldBackgroundColor: const Color(0xFF0F172A),
-            appBarTheme: const AppBarTheme(
-              backgroundColor: Color(0xFF1E293B),
+            scaffoldBackgroundColor:
+                isAmoled ? Colors.black : const Color(0xFF0F172A),
+            appBarTheme: AppBarTheme(
+              backgroundColor:
+                  isAmoled ? Colors.black : const Color(0xFF1E293B),
               elevation: 0,
               scrolledUnderElevation: 0,
+            ),
+            cardTheme: CardThemeData(
+              color: isAmoled ? const Color(0xFF141414) : const Color(0xFF1E293B),
             ),
           ),
           home: const AuthGate(),
@@ -1649,7 +1668,9 @@ class _MainAppScaffoldState extends State<MainAppScaffold>
                           accounts: accounts, transactions: transactions),
                       ReportsTab(
                           accounts: accounts, transactions: transactions),
-                      const SettingsTab(), // Replaced CategoriesTab with modern SettingsTab
+                      SettingsTab(
+                          accounts: accounts,
+                          transactions: transactions), // Replaced CategoriesTab with modern SettingsTab
                     ];
 
                     return Scaffold(
@@ -1916,7 +1937,32 @@ class _DashboardTabState extends State<DashboardTab> {
               ],
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
+          BudgetOverviewCard(
+            transactions: widget.transactions,
+            onManageTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      BudgetsScreen(transactions: widget.transactions),
+                ),
+              );
+            },
+          ),
+          UpcomingBillsDashboardCard(
+            accounts: widget.accounts,
+            onViewAllTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      SubscriptionsBillsScreen(accounts: widget.accounts),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 8),
           Text('RECENT TRANSACTIONS',
               style: GoogleFonts.inter(
                   fontSize: 12,
@@ -3651,7 +3697,14 @@ class BarChartPainter extends CustomPainter {
 // --- 7. Settings Tab (NEW) ---
 
 class SettingsTab extends StatefulWidget {
-  const SettingsTab({super.key});
+  final List<Account> accounts;
+  final List<Transaction> transactions;
+
+  const SettingsTab({
+    super.key,
+    this.accounts = const [],
+    this.transactions = const [],
+  });
 
   @override
   State<SettingsTab> createState() => _SettingsTabState();
@@ -3961,13 +4014,13 @@ class _SettingsTabState extends State<SettingsTab> {
                       style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                   trailing: DropdownButton<String>(
                     value: currentThemeMode,
-                    underline: const SizedBox(),
-                    items: ['light', 'dark', 'system'].map((m) {
-                      return DropdownMenuItem(
-                        value: m,
-                        child: Text(m[0].toUpperCase() + m.substring(1)),
-                      );
-                    }).toList(),
+                    items: const [
+                      DropdownMenuItem(value: 'system', child: Text('System')),
+                      DropdownMenuItem(value: 'light', child: Text('Light')),
+                      DropdownMenuItem(value: 'dark', child: Text('Dark')),
+                      DropdownMenuItem(
+                          value: 'amoled', child: Text('AMOLED Black')),
+                    ],
                     onChanged: (val) {
                       if (val != null) box.put('themeMode', val);
                     },
@@ -4234,6 +4287,40 @@ class _SettingsTabState extends State<SettingsTab> {
       ),
 
           _buildSection("FINANCIAL SETUP", [
+            ListTile(
+              leading: _icon(Icons.pie_chart_outline, Colors.indigo),
+              title: Text('Category Budgets',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              subtitle: Text('Set monthly limits & daily burn rates',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => BudgetsScreen(
+                            transactions: widget.transactions)));
+              },
+            ),
+            ListTile(
+              leading: _icon(Icons.event_repeat, const Color(0xFF8B5CF6)),
+              title: Text('Subscriptions & Bills',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              subtitle: Text('Track Netflix, Rent, and recurring outflow',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => SubscriptionsBillsScreen(
+                            accounts: widget.accounts)));
+              },
+            ),
             ListTile(
               leading: _icon(Icons.category_outlined, Colors.blue),
               title: Text('Categories',

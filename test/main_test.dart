@@ -2,6 +2,8 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:expense_tracker/main.dart';
 import 'package:expense_tracker/notification_tracking_service.dart';
+import 'package:expense_tracker/budget_service.dart';
+import 'package:expense_tracker/subscription_bills_service.dart';
 
 void main() {
   group('EncryptionService Tests', () {
@@ -442,6 +444,190 @@ void main() {
         expect(result, isNotNull);
         expect(result!.amount, 35000.0);
         expect(result.type, DetectedTransactionType.income);
+      });
+    });
+
+    group('CategoryBudget & BudgetService Tests', () {
+      test('Calculates category spending correctly with and without splits', () {
+        final now = DateTime(2026, 10, 15);
+        final txns = [
+          Transaction(
+            id: '1',
+            amount: 500,
+            type: TransactionType.expense,
+            sourceAccountId: 1,
+            category: 'Food',
+            date: DateTime(2026, 10, 2),
+          ),
+          Transaction(
+            id: '2',
+            amount: 300,
+            type: TransactionType.expense,
+            sourceAccountId: 1,
+            category: 'Other',
+            splits: [
+              TransactionSplit(category: 'Food', amount: 200),
+              TransactionSplit(category: 'Shopping', amount: 100),
+            ],
+            date: DateTime(2026, 10, 5),
+          ),
+          Transaction(
+            id: '3',
+            amount: 400,
+            type: TransactionType.income, // Income should not count towards expense budget
+            sourceAccountId: 1,
+            category: 'Food',
+            date: DateTime(2026, 10, 10),
+          ),
+          Transaction(
+            id: '4',
+            amount: 600,
+            type: TransactionType.expense,
+            sourceAccountId: 1,
+            category: 'Food',
+            date: DateTime(2026, 9, 28), // Previous month should be ignored
+          ),
+        ];
+
+        final spent = BudgetService.calculateCategorySpent('Food', txns, now: now);
+        expect(spent, 700.0); // 500 + 200
+      });
+
+      test('Computes BudgetStatus, burn rate, and alert flags properly', () {
+        final now = DateTime(2026, 10, 15); // Day 15 of 31-day October -> 17 days remaining
+        final budget = CategoryBudget(
+          category: 'Dining',
+          monthlyLimit: 10000,
+          alertThreshold: 0.8,
+        );
+
+        final txns = [
+          Transaction(
+            id: '1',
+            amount: 8500,
+            type: TransactionType.expense,
+            sourceAccountId: 1,
+            category: 'Dining',
+            date: DateTime(2026, 10, 10),
+          ),
+        ];
+
+        final status = BudgetService.getStatus(budget, txns, now: now);
+        expect(status.spent, 8500.0);
+        expect(status.remaining, 1500.0);
+        expect(status.isNearLimit, isTrue); // 85% >= 80% threshold
+        expect(status.isOverBudget, isFalse);
+        expect(status.daysRemainingInMonth, 17);
+        expect(status.dailyBurnRate.round(), (1500 / 17).round());
+      });
+
+      test('Flags over-budget condition accurately', () {
+        final now = DateTime(2026, 10, 20);
+        final budget = CategoryBudget(
+          category: 'Shopping',
+          monthlyLimit: 5000,
+        );
+
+        final txns = [
+          Transaction(
+            id: '1',
+            amount: 5500,
+            type: TransactionType.expense,
+            sourceAccountId: 1,
+            category: 'Shopping',
+            date: DateTime(2026, 10, 12),
+          ),
+        ];
+
+        final status = BudgetService.getStatus(budget, txns, now: now);
+        expect(status.isOverBudget, isTrue);
+        expect(status.remaining, 0.0);
+      });
+    });
+
+    group('BillSubscription & SubscriptionBillsService Tests', () {
+      test('Computes status: upcoming, due today, overdue, and paid', () {
+        final now = DateTime(2026, 10, 12);
+
+        final upcomingBill = BillSubscription(
+          id: '1',
+          name: 'Netflix',
+          amount: 649,
+          dueDate: DateTime(2026, 10, 15),
+        );
+        expect(upcomingBill.getStatus(now), BillStatus.upcoming);
+        expect(upcomingBill.daysUntilDue, 3);
+
+        final todayBill = BillSubscription(
+          id: '2',
+          name: 'WiFi',
+          amount: 999,
+          dueDate: DateTime(2026, 10, 12),
+        );
+        expect(todayBill.getStatus(now), BillStatus.dueToday);
+        expect(todayBill.daysUntilDue, 0);
+
+        final overdueBill = BillSubscription(
+          id: '3',
+          name: 'Rent',
+          amount: 15000,
+          dueDate: DateTime(2026, 10, 5),
+        );
+        expect(overdueBill.getStatus(now), BillStatus.overdue);
+
+        final paidBill = BillSubscription(
+          id: '4',
+          name: 'Gym',
+          amount: 1500,
+          dueDate: DateTime(2026, 10, 8),
+          lastPaidDate: DateTime(2026, 10, 7),
+        );
+        expect(paidBill.getStatus(now), BillStatus.paid);
+      });
+
+      test('Calculates monthly recurring commitment across frequencies', () {
+        final bills = [
+          BillSubscription(
+            id: '1',
+            name: 'Netflix',
+            amount: 649, // Monthly
+            frequency: RecurrenceFrequency.monthly,
+            dueDate: DateTime(2026, 10, 15),
+          ),
+          BillSubscription(
+            id: '2',
+            name: 'Amazon Prime',
+            amount: 1499, // Yearly -> ~124.91/mo
+            frequency: RecurrenceFrequency.yearly,
+            dueDate: DateTime(2026, 12, 1),
+          ),
+          BillSubscription(
+            id: '3',
+            name: 'House Help',
+            amount: 500, // Weekly -> 500 * 4.33 = 2165/mo
+            frequency: RecurrenceFrequency.weekly,
+            dueDate: DateTime(2026, 10, 14),
+          ),
+        ];
+
+        final total = SubscriptionBillsService.calculateTotalMonthlyCommitment(bills);
+        final expected = 649.0 + (1499.0 / 12) + (500.0 * 4.33);
+        expect((total - expected).abs() < 0.1, isTrue);
+      });
+
+      test('Advances next cycle due date accurately on monthly cycle', () {
+        final bill = BillSubscription(
+          id: '1',
+          name: 'Rent',
+          amount: 18000,
+          frequency: RecurrenceFrequency.monthly,
+          dueDate: DateTime(2026, 10, 15),
+        );
+
+        final nextDue = SubscriptionBillsService.calculateNextCycleDueDate(bill);
+        expect(nextDue.year, 2026);
+        expect(nextDue.month, 11);
+        expect(nextDue.day, 15);
       });
     });
   });
