@@ -75,6 +75,35 @@ class NotificationTrackingService {
   
   static final Set<String> _recentSignatures = {};
 
+  /// Packages that send financial news, search results, stock alerts, social media, or ads
+  /// that should NEVER be parsed as payment transactions.
+  static final Set<String> blacklistedPackages = {
+    'com.google.android.googlequicksearchbox', // Google App / Google Finance / Discover
+    'com.google.android.apps.magazines', // Google News
+    'com.android.chrome',
+    'com.chrome.beta',
+    'com.chrome.canary',
+    'org.chromium.chrome',
+    'com.google.android.youtube',
+    'com.instagram.android',
+    'com.facebook.katana',
+    'com.facebook.orca',
+    'com.twitter.android',
+    'com.twitter.android.lite',
+    'com.linkedin.android',
+    'com.reddit.frontpage',
+    'com.divum.MoneyControl',
+    'com.zerodha.kite3',
+    'com.nextbillion.groww',
+    'com.upstox.pro',
+    'com.angelbroking.angelwealth',
+    'com.indwealth',
+    'com.et.market',
+    'com.investing.quotes',
+    'com.tradingview.tradingviewapp',
+    'com.tickertape.app',
+  };
+
   /// Known payment and banking package names
   static final Map<String, String> knownPackages = {
     'com.google.android.apps.nbu.paisa.user': 'Google Pay',
@@ -84,12 +113,21 @@ class NotificationTrackingService {
     'in.org.npci.upiapp': 'BHIM UPI',
     'in.amazon.mShop.android.shopping': 'Amazon Pay',
     'com.snapwork.hdfc': 'HDFC Bank',
+    'com.hdfcbank.payzapp': 'HDFC PayZapp',
     'com.csam.icici.bank.imobile': 'ICICI Bank',
+    'com.icicibank.pockets': 'ICICI Pockets',
     'com.axis.mobile': 'Axis Bank',
     'com.sbi.lotusintouch': 'SBI YONO',
     'com.msf.kbank.mobile': 'Kotak Bank',
+    'com.indusind.mobile': 'IndusInd Bank',
+    'com.bankofbaroda.mconnect': 'Bank of Baroda',
+    'com.idfcfirstbank.optimus': 'IDFC First Bank',
+    'com.jupiter.money': 'Jupiter',
+    'com.fi.money': 'Fi Money',
+    'com.onecard.app': 'OneCard',
     'com.google.android.apps.messaging': 'SMS',
     'com.samsung.android.messaging': 'SMS',
+    'com.android.mms': 'SMS',
   };
 
   /// Initialize the notification listener
@@ -108,20 +146,34 @@ class NotificationTrackingService {
     }
   }
 
-  /// Load pending detected transactions from Hive
+  /// Load pending detected transactions from Hive and automatically purge false positives
   static void _loadPendingTransactions() {
     try {
       final box = Hive.box('detected_transactions');
       final List<DetectedTransaction> list = [];
+      final List<dynamic> invalidKeys = [];
+
       for (var key in box.keys) {
         final val = box.get(key);
         if (val is Map) {
           final item = DetectedTransaction.fromMap(val);
+          // Auto-purge any items that originate from blacklisted packages or match negative keywords
+          if (blacklistedPackages.contains(item.packageName) ||
+              _containsNegativeKeywords('${item.rawTitle} ${item.rawContent}')) {
+            invalidKeys.add(key);
+            continue;
+          }
           if (item.status == 'pending') {
             list.add(item);
           }
         }
       }
+
+      // Purge invalid entries
+      for (var k in invalidKeys) {
+        box.delete(k);
+      }
+
       // Sort newest first
       list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       pendingTransactionsNotifier.value = list;
@@ -182,12 +234,30 @@ class NotificationTrackingService {
     final pkg = event.packageName;
     final title = event.title;
     final content = event.content;
+    final fullText = '$title $content';
 
-    // If it's not a known payment app or an SMS app, check if it contains banking keywords
+    // 1. Drop blacklisted packages immediately (Google App, News, Browsers, Social, Stock apps)
+    if (blacklistedPackages.contains(pkg)) {
+      debugPrint("Ignored notification from blacklisted package: $pkg");
+      return;
+    }
+
+    // 2. Drop negative keywords immediately (stocks/shares up/down, offers, coupons, OTPs, reminders)
+    if (_containsNegativeKeywords(fullText)) {
+      debugPrint("Ignored notification matching negative keywords: $title - $content");
+      return;
+    }
+
+    // 3. Must contain an explicit payment/banking verb
+    if (!_hasValidTransactionVerbs(fullText)) {
+      return;
+    }
+
+    // 4. If not a dedicated payment app, must contain banking context (a/c, account, card, bank, upi ref)
     bool isPaymentApp = knownPackages.containsKey(pkg);
-    bool hasPaymentKeywords = _hasFinancialKeywords('$title $content');
+    bool hasBankingIndicators = _hasBankingIndicators(fullText);
 
-    if (!isPaymentApp && !hasPaymentKeywords) {
+    if (!isPaymentApp && !hasBankingIndicators) {
       return;
     }
 
@@ -202,8 +272,100 @@ class NotificationTrackingService {
     }
   }
 
-  /// Check if text contains Indian banking/payment keywords
-  static bool _hasFinancialKeywords(String text) {
+  /// Check for negative keywords (stock movements, marketing offers, OTPs, due reminders)
+  static bool _containsNegativeKeywords(String text) {
+    final lower = text.toLowerCase();
+
+    // Stock & market movements (e.g. Google Finance, News alerts)
+    if (lower.contains('is up') ||
+        lower.contains('rose to') ||
+        lower.contains('jumped to') ||
+        lower.contains('gained') ||
+        lower.contains('is down') ||
+        lower.contains('fell to') ||
+        lower.contains('slipped to') ||
+        lower.contains('dropped to') ||
+        lower.contains('plunged') ||
+        lower.contains('trading at') ||
+        lower.contains('closed at') ||
+        lower.contains('share price') ||
+        lower.contains('shares of') ||
+        lower.contains('stock price') ||
+        lower.contains('stocks up') ||
+        lower.contains('stocks down') ||
+        lower.contains('all-time high') ||
+        lower.contains('52-week') ||
+        lower.contains('market alert') ||
+        lower.contains('price alert') ||
+        lower.contains('watchlist') ||
+        lower.contains('sensex') ||
+        lower.contains('nifty') ||
+        lower.contains('nasdaq') ||
+        lower.contains('target price') ||
+        lower.contains('bullish') ||
+        lower.contains('bearish')) {
+      return true;
+    }
+
+    // Marketing, discounts, promotional offers
+    if (lower.contains('flat rs') ||
+        lower.contains('flat ₹') ||
+        lower.contains('earn up to') ||
+        lower.contains('cashback up to') ||
+        lower.contains('win up to') ||
+        lower.contains('win ₹') ||
+        lower.contains('chance to win') ||
+        lower.contains('upto rs') ||
+        lower.contains('upto ₹') ||
+        lower.contains('up to rs') ||
+        lower.contains('up to ₹') ||
+        lower.contains('use code') ||
+        lower.contains('use coupon') ||
+        lower.contains('apply code') ||
+        lower.contains('discount of') ||
+        lower.contains('voucher') ||
+        lower.contains('coupon') ||
+        lower.contains('special offer') ||
+        lower.contains('limited offer') ||
+        lower.contains('save up to') ||
+        lower.contains('off on your next') ||
+        lower.contains('% off') ||
+        lower.contains('pre-approved') ||
+        lower.contains('congratulations! you are eligible') ||
+        lower.contains('avail loan') ||
+        lower.contains('get a personal loan') ||
+        lower.contains('instant personal loan')) {
+      return true;
+    }
+
+    // OTP / Verification / Login codes
+    if (lower.contains('otp') ||
+        lower.contains('one time password') ||
+        lower.contains('verification code') ||
+        lower.contains('security code') ||
+        lower.contains('secret code') ||
+        lower.contains('do not share') ||
+        lower.contains('don\'t share')) {
+      return true;
+    }
+
+    // Future bill due reminders
+    if (lower.contains('bill is due') ||
+        lower.contains('bill due on') ||
+        lower.contains('last date to pay') ||
+        lower.contains('recharge due') ||
+        lower.contains('bill generated') ||
+        lower.contains('minimum amount due') ||
+        lower.contains('pay before') ||
+        lower.contains('upcoming payment')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Must contain explicit action verbs indicating an actual debit, credit, or transfer
+  static bool _hasValidTransactionVerbs(String text) {
     final lower = text.toLowerCase();
     return lower.contains('paid') ||
         lower.contains('debited') ||
@@ -211,9 +373,41 @@ class NotificationTrackingService {
         lower.contains('credited') ||
         lower.contains('sent rs') ||
         lower.contains('sent inr') ||
-        lower.contains('₹') ||
+        lower.contains('sent ₹') ||
+        lower.contains('received rs') ||
+        lower.contains('received inr') ||
+        lower.contains('received ₹') ||
+        lower.contains('withdrawn') ||
+        lower.contains('auto-debit') ||
+        lower.contains('auto debited') ||
+        lower.contains('payment successful') ||
+        lower.contains('payment of') ||
+        lower.contains('payment to') ||
+        lower.contains('transfer successful') ||
+        lower.contains('transferred to') ||
+        lower.contains('refund of') ||
+        lower.contains('refund received') ||
+        lower.contains('cashback received') ||
+        lower.contains('money sent to') ||
+        lower.contains('money received from');
+  }
+
+  /// Banking indicators for SMS or other non-payment app notifications
+  static bool _hasBankingIndicators(String text) {
+    final lower = text.toLowerCase();
+    return lower.contains('a/c') ||
+        lower.contains('acct') ||
+        lower.contains('account') ||
+        lower.contains('card ending') ||
+        lower.contains('credit card') ||
+        lower.contains('debit card') ||
+        lower.contains('upi ref') ||
+        lower.contains('upi txn') ||
+        lower.contains('bank') ||
         lower.contains('vpa') ||
-        lower.contains('upi');
+        lower.contains('bal:') ||
+        lower.contains('avbl bal') ||
+        lower.contains('avl bal');
   }
 
   /// Extract transaction data from notification title & body text
@@ -224,6 +418,16 @@ class NotificationTrackingService {
   }) {
     final fullText = '$title $content';
     final lower = fullText.toLowerCase();
+
+    // Check negative keywords (stock alerts, offers, reminders)
+    if (_containsNegativeKeywords(fullText)) {
+      return null;
+    }
+
+    // Must contain explicit transaction verb
+    if (!_hasValidTransactionVerbs(fullText)) {
+      return null;
+    }
 
     // 1. Amount Extraction
     // Patterns: ₹ 500, Rs. 500, Rs 500, INR 500.00, 500.00 INR
@@ -292,16 +496,25 @@ class NotificationTrackingService {
       r'(?:paid to|sent to|to|at|for|vpa)\s+([A-Za-z0-9\s&.-]{2,30}?)(?:\s+(?:on|via|using|from|ref|upi|avl|avbl|bal|a\/c|ending)|\.|\,|$)',
       caseSensitive: false,
     );
-    final match = toPattern.firstMatch('$content $title');
+    final match = toPattern.firstMatch(content) ?? toPattern.firstMatch(title);
     if (match != null) {
       String candidate = match.group(1)?.trim() ?? '';
+      final cLower = candidate.toLowerCase();
       // Exclude generic noise
       if (candidate.isNotEmpty &&
-          !candidate.toLowerCase().contains('account') &&
-          !candidate.toLowerCase().contains('card') &&
-          !candidate.toLowerCase().contains('bank') &&
+          !cLower.contains('account') &&
+          !cLower.contains('card') &&
+          !cLower.contains('bank') &&
           candidate.length > 1) {
-        return _capitalize(candidate);
+        candidate = candidate
+            .replaceAll(
+                RegExp(r'(?:google pay|gpay|phonepe|paytm|bhim|cred)$',
+                    caseSensitive: false),
+                '')
+            .trim();
+        if (candidate.isNotEmpty) {
+          return _capitalize(candidate);
+        }
       }
     }
 

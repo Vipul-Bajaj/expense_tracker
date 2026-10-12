@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:expense_tracker/main.dart';
+import 'package:expense_tracker/notification_tracking_service.dart';
 
 void main() {
   group('EncryptionService Tests', () {
@@ -354,6 +355,94 @@ void main() {
 
       expect(breakdown['Bank'], 50.0);
       expect(breakdown['Wallet'], 30.0);
+    });
+
+    group('Notification Parser & False-Positive Filtering Tests', () {
+      test('Rejects Google Finance stock update notification', () {
+        final result = NotificationTrackingService.parseTransactionText(
+          title: '544773 is up 4.5%',
+          content: 'Merritronix LTD rose to ₹414.80 today',
+          packageName: 'com.google.android.googlequicksearchbox',
+        );
+        expect(result, isNull);
+      });
+
+      test('Rejects generic stock market alert', () {
+        final result = NotificationTrackingService.parseTransactionText(
+          title: 'Market Alert: NIFTY 50',
+          content: 'NIFTY 50 is trading at ₹24,850.00 today, up by 150 points',
+          packageName: 'com.divum.MoneyControl',
+        );
+        expect(result, isNull);
+      });
+
+      test('Rejects promotional and discount messages', () {
+        final result = NotificationTrackingService.parseTransactionText(
+          title: 'Special Offer!',
+          content: 'Get flat ₹200 off on your next order! Use code SAVE200',
+          packageName: 'com.phonepe.app',
+        );
+        expect(result, isNull);
+      });
+
+      test('Rejects OTP and security verification codes', () {
+        final result = NotificationTrackingService.parseTransactionText(
+          title: 'HDFC Bank',
+          content:
+              'Your OTP for txn of INR 500.00 is 123456. Do not share with anyone.',
+          packageName: 'com.google.android.apps.messaging',
+        );
+        expect(result, isNull);
+      });
+
+      test('Rejects future bill due notices', () {
+        final result = NotificationTrackingService.parseTransactionText(
+          title: 'Airtel Broadband',
+          content:
+              'Your bill of ₹999.00 is due on 15-Oct. Pay before due date to avoid penalty.',
+          packageName: 'com.google.android.apps.messaging',
+        );
+        expect(result, isNull);
+      });
+
+      test('Parses genuine Google Pay payment', () {
+        final result = NotificationTrackingService.parseTransactionText(
+          title: 'Google Pay',
+          content: 'Paid ₹249.0 to Swiggy',
+          packageName: 'com.google.android.apps.nbu.paisa.user',
+        );
+        expect(result, isNotNull);
+        expect(result!.amount, 249.0);
+        expect(result.payee, 'Swiggy');
+        expect(result.category, 'Food');
+        expect(result.type, DetectedTransactionType.expense);
+      });
+
+      test('Parses genuine Bank SMS debit', () {
+        final result = NotificationTrackingService.parseTransactionText(
+          title: 'HDFCBK',
+          content:
+              '₹540.00 debited from a/c ending 1234 on 12-Oct-26 to ZOMATO. Avl Bal: ₹25,000.00',
+          packageName: 'com.google.android.apps.messaging',
+        );
+        expect(result, isNotNull);
+        expect(result!.amount, 540.0);
+        expect(result.payee, 'Zomato');
+        expect(result.category, 'Food');
+        expect(result.type, DetectedTransactionType.expense);
+      });
+
+      test('Parses genuine Bank SMS credit', () {
+        final result = NotificationTrackingService.parseTransactionText(
+          title: 'ICICI Bank',
+          content:
+              'Dear Customer, your a/c ending 4567 has been credited with INR 35,000.00 on 01-Oct-26.',
+          packageName: 'com.google.android.apps.messaging',
+        );
+        expect(result, isNotNull);
+        expect(result!.amount, 35000.0);
+        expect(result.type, DetectedTransactionType.income);
+      });
     });
   });
 }
