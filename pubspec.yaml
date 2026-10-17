@@ -1,5 +1,5 @@
 name: expense_tracker
-description: "A new Flutter project."
+description: "Secure personal expense tracker with budgets, bills, and automatic payment detection."
 publish_to: 'none'
 version: 1.0.0+1
 

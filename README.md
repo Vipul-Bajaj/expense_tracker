@@ -62,6 +62,35 @@ A powerful, secure, and feature-rich personal finance application built with Flu
     flutter run
     ```
 
+## 🚢 Release Build (Google Play)
+
+Release builds must be signed with your upload key; the build fails if signing is not configured.
+
+1.  **Create an upload key** (once — back it up somewhere safe, never commit it):
+    ```bash
+    keytool -genkey -v -keystore android/app/upload-keystore.jks \
+      -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+    ```
+2.  **Create `android/key.properties`** (git-ignored):
+    ```properties
+    storePassword=<keystore password>
+    keyPassword=<key password>
+    keyAlias=upload
+    storeFile=upload-keystore.jks
+    ```
+3.  **Build the App Bundle:** `flutter build appbundle --release`
+4.  **Firebase / Google Sign-In:** add the SHA-1 and SHA-256 of both your upload key and the
+    Play App Signing key (Play Console → Test and release → App integrity) to the Android app in
+    the Firebase console, then download the updated `google-services.json`.
+
+**CI:** add these repository secrets so the workflow produces a Play-ready, signed `.aab`:
+`UPLOAD_KEYSTORE_BASE64` (`base64 -w0 upload-keystore.jks`), `UPLOAD_KEYSTORE_PASSWORD`,
+`UPLOAD_KEY_ALIAS`, `UPLOAD_KEY_PASSWORD`. Without them CI falls back to debug-signed test builds
+(`ALLOW_DEBUG_RELEASE_SIGNING=true`), which Google Play will reject.
+
+**Firestore rules** live in `firestore.rules`; deploy with `firebase deploy --only firestore:rules`.
+The privacy policy and account deletion pages are in `web/` and are published with Firebase Hosting.
+
 ## 📖 How to Use
 
 1.  **Dashboard**: View your current month's summary. Toggle months using the arrows.

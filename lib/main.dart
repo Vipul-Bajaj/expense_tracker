@@ -489,32 +489,74 @@ class AuthService {
     final firestore = FirebaseFirestore.instance;
     final userDoc = firestore.collection('users').doc(user.uid);
 
-    // Delete sub-collections (accounts, transactions, settings)
-    // Note: Firestore doesn't delete sub-collections automatically when parent is deleted.
-
-    // 1. Delete transactions
-    final txns = await userDoc.collection('transactions').get();
-    for (var doc in txns.docs) {
-      await doc.reference.delete();
+    // Firestore doesn't delete sub-collections automatically when the parent
+    // is deleted, so every per-user collection must be listed here.
+    const subCollections = [
+      'transactions',
+      'accounts',
+      'settings',
+      'budgets',
+      'subscriptions',
+    ];
+    for (final name in subCollections) {
+      final docs = await userDoc.collection(name).get();
+      for (var doc in docs.docs) {
+        await doc.reference.delete();
+      }
     }
 
-    // 2. Delete accounts
-    final accs = await userDoc.collection('accounts').get();
-    for (var doc in accs.docs) {
-      await doc.reference.delete();
-    }
-
-    // 3. Delete category settings
-    final settings = await userDoc.collection('settings').get();
-    for (var doc in settings.docs) {
-      await doc.reference.delete();
-    }
-
-    // 4. Delete user document itself
     await userDoc.delete();
 
-    // Finally sign out
+    // Wipe locally cached data so nothing remains on the device.
+    for (final boxName in const [
+      'expenses_db',
+      'category_budgets',
+      'bills_subscriptions',
+    ]) {
+      try {
+        if (Hive.isBoxOpen(boxName)) await Hive.box(boxName).clear();
+      } catch (e) {
+        debugPrint("Error clearing local box $boxName: $e");
+      }
+    }
+    try {
+      await Hive.box('settings').clear();
+    } catch (_) {}
+    try {
+      await NotificationTrackingService.clearAll();
+    } catch (_) {}
+    BudgetService.budgetsNotifier.value = [];
+    SubscriptionBillsService.billsNotifier.value = [];
+
+    // Delete the Firebase Auth account itself. This requires a recent sign-in,
+    // so re-authenticate with Google once if Firebase asks for it.
+    try {
+      await user.delete();
+    } on FirebaseAuthException catch (e) {
+      if (e.code != 'requires-recent-login') rethrow;
+      await _reauthenticate(user);
+      await user.delete();
+    }
+
     await signOut();
+  }
+
+  static Future<void> _reauthenticate(User user) async {
+    if (kIsWeb) {
+      await user.reauthenticateWithPopup(GoogleAuthProvider());
+      return;
+    }
+    final googleUser = await _googleSignIn.signIn();
+    if (googleUser == null) {
+      throw FirebaseAuthException(
+          code: 'reauth-cancelled',
+          message: 'Re-authentication was cancelled.');
+    }
+    final googleAuth = await googleUser.authentication;
+    await user.reauthenticateWithCredential(GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    ));
   }
 }
 
@@ -3740,7 +3782,7 @@ class _SettingsTabState extends State<SettingsTab> {
         title: Text('Delete All Data?',
             style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Text(
-            'This will permanently delete all your transactions, accounts, and settings. This action cannot be undone.',
+            'This will permanently delete your account and all your data — transactions, accounts, budgets, bills, and settings — from the cloud and this device. This action cannot be undone.',
             style: GoogleFonts.inter()),
         actions: [
           TextButton(
@@ -3758,12 +3800,18 @@ class _SettingsTabState extends State<SettingsTab> {
                 ),
               );
 
-              await AuthService.deleteUserData();
+              String message = "Account and all data deleted successfully";
+              try {
+                await AuthService.deleteUserData();
+              } catch (e) {
+                debugPrint("Error deleting account: $e");
+                message = "Could not finish deleting your account. Please try again.";
+              }
 
               if (mounted) {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("All data deleted successfully")),
+                  SnackBar(content: Text(message)),
                 );
               }
             },
@@ -4137,17 +4185,23 @@ class _SettingsTabState extends State<SettingsTab> {
                             showDialog(
                               context: context,
                               builder: (ctx) => AlertDialog(
-                                title: Text('Notification Access Needed',
+                                title: Text('Notification Access Disclosure',
                                     style: GoogleFonts.inter(
                                         fontWeight: FontWeight.bold)),
-                                content: Text(
-                                  'To automatically ingest UPI and card payments, Expense Tracker needs permission to read payment notifications from apps like Google Pay, PhonePe, Paytm, and your bank.\n\nPlease enable "Expense Tracker" on the next screen.',
-                                  style: GoogleFonts.inter(fontSize: 14),
+                                content: SingleChildScrollView(
+                                  child: Text(
+                                    'Expense Tracker can automatically log payments by reading notifications from payment and banking apps such as Google Pay, PhonePe, Paytm, and your bank.\n\n'
+                                    'What is read: the text of notifications on your device. Only notifications that look like payments are kept; all others are ignored.\n\n'
+                                    'What is collected: the payment amount, payee/merchant, time, and the original notification text. Detected payments are stored on this device until you approve or dismiss them. Approved payments are saved to your account in the cloud (Google Firebase) so they sync across your devices.\n\n'
+                                    'This data is never sold or shared with third parties, and is not used for advertising. You can turn this off at any time in Settings.\n\n'
+                                    'If you agree, enable "Expense Tracker" on the next screen.',
+                                    style: GoogleFonts.inter(fontSize: 14),
+                                  ),
                                 ),
                                 actions: [
                                   TextButton(
                                     onPressed: () => Navigator.pop(ctx),
-                                    child: Text('Cancel',
+                                    child: Text('No Thanks',
                                         style: GoogleFonts.inter(
                                             color: Colors.grey)),
                                   ),
@@ -4166,7 +4220,7 @@ class _SettingsTabState extends State<SettingsTab> {
                                             .startListening();
                                       }
                                     },
-                                    child: Text('Open Settings',
+                                    child: Text('Agree & Continue',
                                         style: GoogleFonts.inter(
                                             color: const Color(0xFF2563EB),
                                             fontWeight: FontWeight.bold)),

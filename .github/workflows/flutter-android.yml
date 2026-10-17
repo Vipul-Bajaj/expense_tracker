@@ -61,8 +61,38 @@ jobs:
         run: flutter test
         continue-on-error: true
 
+      - name: Configure release signing
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [ -n "$UPLOAD_KEYSTORE_BASE64" ]; then
+            echo "$UPLOAD_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+            cat > android/key.properties <<EOF
+          storePassword=$UPLOAD_KEYSTORE_PASSWORD
+          keyPassword=$UPLOAD_KEY_PASSWORD
+          keyAlias=$UPLOAD_KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+            echo "RELEASE_SIGNED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Upload key secrets not set; building debug-signed artifacts (not uploadable to Google Play)."
+            echo "ALLOW_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Build Release APK
         run: flutter build apk --release --android-skip-build-dependency-validation
+
+      - name: Build Release App Bundle (Google Play)
+        run: flutter build appbundle --release --android-skip-build-dependency-validation
+
+      - name: Upload App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
 
       - name: Prepare APK for distribution
         run: |

@@ -19,7 +19,9 @@ android {
     }
 
     namespace = "app.vipulbajaj.expensetracker"
-    compileSdk = flutter.compileSdkVersion
+    // Google Play requires targeting a recent API level; pin it so the build
+    // doesn't depend on whichever Flutter version happens to be installed.
+    compileSdk = maxOf(flutter.compileSdkVersion, 36)
     ndkVersion = "27.1.12297006"
 
     compileOptions {
@@ -52,23 +54,35 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Permanent once published on Google Play — never change this.
         applicationId = "app.vipulbajaj.expensetracker"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            // Release builds must be signed with the upload key from key.properties.
+            // Debug-key fallback is only for CI/dev builds and must be opted into
+            // explicitly, so a debug-signed build can never be uploaded by accident.
+            signingConfig = when {
+                keystorePropertiesFile.exists() -> signingConfigs.getByName("release")
+                System.getenv("ALLOW_DEBUG_RELEASE_SIGNING") == "true" -> signingConfigs.getByName("debug")
+                else -> null
             }
+        }
+    }
+
+    gradle.taskGraph.whenReady {
+        val buildsRelease = allTasks.any { it.name.contains("Release") }
+        if (buildsRelease && signingConfigs.findByName("release") == null &&
+            System.getenv("ALLOW_DEBUG_RELEASE_SIGNING") != "true") {
+            throw GradleException(
+                "Release signing is not configured. Create android/key.properties " +
+                "(see README) or set ALLOW_DEBUG_RELEASE_SIGNING=true for a non-Play test build."
+            )
         }
     }
 }

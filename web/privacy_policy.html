@@ -38,7 +38,7 @@
 
 <body>
     <h1>Privacy Policy</h1>
-    <p>Last updated: February 12, 2026</p>
+    <p>Last updated: October 17, 2026</p>
 
     <p>This Privacy Policy describes Our policies and procedures on the collection, use and disclosure of Your
         information when You use the Expense Tracker application.</p>
@@ -68,12 +68,37 @@
     </ul>
 
     <h4>Financial Data</h4>
-    <p>The Application allows You to track Your expenses and income. This data is:
+    <p>The Application allows You to track Your expenses, income, accounts, budgets, and bills. This data is:</p>
     <ul>
-        <li>Stored securely in the cloud (Google Firestore).</li>
-        <li>Encrypted before being stored, ensuring that only You have access to the raw details of Your transactions.
-        </li>
-        <li>Not shared with any third-party advertisers or data brokers.</li>
+        <li>Stored in the cloud (Google Cloud Firestore) under Your account so it can sync across Your devices, and
+            cached locally on Your device.</li>
+        <li>Protected in transit (TLS) and at rest by Google Firebase. Sensitive fields such as amounts, balances,
+            categories, and notes are additionally encrypted by the Application before upload.</li>
+        <li>Accessible only to Your signed-in account, and never sold or shared with advertisers or data brokers.</li>
+    </ul>
+
+    <h4>Payment Notifications (Optional)</h4>
+    <p>If You turn on automatic payment detection, the Application asks for Android notification access and reads
+        notifications on Your device to recognise payments from banking and payment apps (for example Google Pay,
+        PhonePe, Paytm, or Your bank).</p>
+    <ul>
+        <li>This feature is off by default and is only enabled after You agree to an in-app disclosure and grant access
+            in Android settings. You can turn it off at any time.</li>
+        <li>Notifications that do not look like payments are ignored and not stored.</li>
+        <li>For detected payments, the amount, payee/merchant, time, source app, and original notification text are
+            stored <strong>only on Your device</strong> until You approve or dismiss them.</li>
+        <li>When You approve a detected payment, it is saved as a transaction to Your account in the cloud. The original
+            notification text is not uploaded.</li>
+        <li>This data is never sold, shared with third parties, or used for advertising.</li>
+    </ul>
+
+    <h4>Usage of Third-Party Network Services</h4>
+    <ul>
+        <li><strong>Currency rates</strong>: the Application downloads exchange rates from the Frankfurter API
+            (api.frankfurter.app). No personal or financial data is sent; the service can see Your IP address as part
+            of the request.</li>
+        <li><strong>Fonts</strong>: the Application may download fonts from Google Fonts. No personal data is sent
+            beyond the standard request information such as IP address.</li>
     </ul>
 
     <h3>Biometric Data (Local Auth)</h3>
@@ -91,11 +116,17 @@
         resolve disputes, and enforce our legal agreements and policies.</p>
 
     <h2>Delete Your Data</h2>
-    <p>You have the right to delete Your account and all associated data directly within the Application settings. Upon
-        deletion, all Your data is permanently removed from our servers.</p>
+    <p>You can delete Your account and all associated data at any time from the Application's settings
+        (<em>Delete All Data</em>). This permanently removes Your transactions, accounts, budgets, bills, and settings
+        from our servers, deletes Your sign-in account, and clears the data stored on Your device.</p>
+    <p>If You no longer have the Application installed, You can request deletion of Your account and data by emailing
+        <a href="mailto:vipulbjj@gmail.com?subject=Expense%20Tracker%20account%20deletion">vipulbjj@gmail.com</a>
+        from the Google account You used to sign in, with the subject "Expense Tracker account deletion". We will delete
+        Your account and all associated data within 30 days. See also our
+        <a href="delete_account.html">account deletion page</a>.</p>
 
     <h2>Service Providers</h2>
-    <p>We use the following third-party Service Providers to monitor and analyze the use of our Service:</p>
+    <p>We use the following third-party Service Providers to operate the Service:</p>
     <ul>
         <li><strong>Firebase (Google)</strong>: For authentication, database storage, and hosting.</li>
     </ul>
