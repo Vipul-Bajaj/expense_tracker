@@ -27,8 +27,19 @@ jobs:
           fetch-depth: 0
 
       - name: Restore Firebase configuration
+        env:
+          FIREBASE_OPTIONS_DART_BASE64: ${{ secrets.FIREBASE_OPTIONS_DART_BASE64 }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
+          # Prefer the current config from secrets; the git-history copies below are stale.
+          if [ -n "$FIREBASE_OPTIONS_DART_BASE64" ]; then
+            echo "$FIREBASE_OPTIONS_DART_BASE64" | base64 --decode > lib/firebase_options.dart
+          fi
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
+          fi
           if [ ! -f lib/firebase_options.dart ]; then
+            echo "::warning::FIREBASE_OPTIONS_DART_BASE64 not set; using an outdated firebase_options.dart from git history."
             git show 928675fa568ee9cead3b238e6b4da9b2e9e6236a:lib/firebase_options.dart > lib/firebase_options.dart 2>/dev/null || true
           fi
           if [ ! -f android/app/google-services.json ]; then

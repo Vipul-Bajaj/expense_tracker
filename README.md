@@ -49,6 +49,7 @@ A powerful, secure, and feature-rich personal finance application built with Flu
     ```
 
 2.  **Firebase Configuration**
+    * Generate `lib/firebase_options.dart` (git-ignored): `flutterfire configure --project=expense-tracker-6f119`
     * **Android**: Download `google-services.json` from your Firebase Console and place it in `android/app/`.
     * **iOS**: Download `GoogleService-Info.plist` and place it in `ios/Runner/`. **Note:** Ensure the `REVERSED_CLIENT_ID` in `Info.plist` matches your Google Service file.
 
@@ -85,7 +86,9 @@ Release builds must be signed with your upload key; the build fails if signing i
 
 **CI:** add these repository secrets so the workflow produces a Play-ready, signed `.aab`:
 `UPLOAD_KEYSTORE_BASE64` (`base64 -w0 upload-keystore.jks`), `UPLOAD_KEYSTORE_PASSWORD`,
-`UPLOAD_KEY_ALIAS`, `UPLOAD_KEY_PASSWORD`. Without them CI falls back to debug-signed test builds
+`UPLOAD_KEY_ALIAS`, `UPLOAD_KEY_PASSWORD`. Also add `FIREBASE_OPTIONS_DART_BASE64`
+(`base64 -w0 lib/firebase_options.dart`) and `GOOGLE_SERVICES_JSON_BASE64`
+(`base64 -w0 android/app/google-services.json`) so CI uses your current Firebase config. Without them CI falls back to debug-signed test builds
 (`ALLOW_DEBUG_RELEASE_SIGNING=true`), which Google Play will reject.
 
 **Firestore rules** live in `firestore.rules`; deploy with `firebase deploy --only firestore:rules`.
